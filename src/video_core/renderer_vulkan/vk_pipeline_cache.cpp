@@ -436,6 +436,17 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
     if (is_new) {
         const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
         if (VideoCore::SafeGpuGate::IsEnabled() &&
+            VideoCore::SafeGpuGate::IsQuarantinedGraphicsPipelineHash(pipeline_hash)) {
+            LOG_WARNING(Render_Vulkan,
+                        "[SafeGPU] QUARANTINE profile={} graphics pipeline hash={:#x} before "
+                        "vkCreateGraphicsPipelines",
+                        VideoCore::SafeGpuGate::GetProfileName(), pipeline_hash);
+            infos.fill(nullptr);
+            modules.fill(nullptr);
+            fetch_shader.reset();
+            return nullptr;
+        }
+        if (VideoCore::SafeGpuGate::IsEnabled() &&
             !VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(pipeline_hash)) {
             LOG_INFO(Render_Vulkan,
                      "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 06 candidate prefilter "
@@ -494,9 +505,9 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
                 return nullptr;
             }
             LOG_INFO(Render_Vulkan,
-                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 06 candidate prefilter "
-                     "and geometry-first feature gate before vkCreateGraphicsPipelines",
-                     pipeline_hash);
+                     "[SafeGPU] ALLOW profile={} graphics pipeline hash={:#x} by Build 11 "
+                     "per-title feature gate before vkCreateGraphicsPipelines",
+                     VideoCore::SafeGpuGate::GetProfileName(), pipeline_hash);
         }
             if (VideoCore::SafeGpuGate::ShouldUseFlatFragment(pipeline_hash)) {
         if (!safe_gpu_flat_fragment_module) {

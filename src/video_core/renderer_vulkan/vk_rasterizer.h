@@ -100,6 +100,8 @@ private:
     static bool ShouldLogSafeGpuSample(u64 count) noexcept;
     void LogSafeGpuSummary() const;
     bool IsSafeGpuGraphicsPipeline(const GraphicsPipeline* pipeline) const;
+    void PersistLastSubmittedGraphicsPipeline(const GraphicsPipeline* pipeline,
+                                              std::string_view draw_type, bool is_indexed);
 
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
@@ -159,6 +161,7 @@ private:
     Shader::PushData push_data;
     const bool safe_gpu_active;
     SafeGpuStats safe_gpu_stats;
+    u64 safe_gpu_last_submitted_pipeline_hash{};
 
     using BufferBindingInfo = std::tuple<VideoCore::BufferId, AmdGpu::Buffer, u64>;
     boost::container::static_vector<BufferBindingInfo, Shader::NUM_BUFFERS> buffer_bindings;

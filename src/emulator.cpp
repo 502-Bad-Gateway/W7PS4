@@ -432,6 +432,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     EmulatorSettings.Load(id);
+    VideoCore::SafeGpuGate::SetGameSerial(id);
 #ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
     LOG_INFO(Config,
              "Windows 7 compatibility-only settings active: null_gpu={}, safe_gpu={}, "
@@ -446,6 +447,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
     LOG_INFO(Config, "NullGPU: {}", EmulatorSettings.IsNullGPU());
     LOG_INFO(Config, "SafeGPU policy/version: {}", VideoCore::SafeGpuGate::PolicyVersion());
+    LOG_INFO(Config, "SafeGPU per-title profile: {}", VideoCore::SafeGpuGate::GetProfileName());
     LOG_INFO(Config, "GPU effective mode: {}", VideoCore::SafeGpuGate::GetEffectiveModeName());
     if (EmulatorSettings.IsNullGPU() && EmulatorSettings.IsSafeGPU()) {
         LOG_WARNING(Config, "SafeGPU was requested with NullGPU; NullGPU takes precedence");

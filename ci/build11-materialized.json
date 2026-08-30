@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "historical_source_head": "81b53122760c949aee1b0529c9632585d021e38d",
+  "build11_transform_parent": "340968cb794f200ab8c93cf0b1d2c7756f013470",
+  "publication_parent": "c22cacc3d6296cf0fd4499b1cb30626eb6bed9fd",
+  "source_diff_git_blob": "a1cd6dc7ddbc3cd0c109a0a5e561e19ac391d908",
+  "transforms": [
+    "ci/build09r2-preserve-fragment-binding-slots.patch",
+    "ci/build10-disable-push-descriptors.patch",
+    "ci/apply-build11.ps1",
+    "ci/fix-build11-draw-sites.ps1"
+  ],
+  "modified_source_files": [
+    "src/emulator.cpp",
+    "src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp",
+    "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+    "src/video_core/renderer_vulkan/vk_rasterizer.cpp",
+    "src/video_core/renderer_vulkan/vk_rasterizer.h",
+    "src/video_core/safe_gpu/safe_gpu.cpp",
+    "src/video_core/safe_gpu/safe_gpu.h"
+  ]
+}

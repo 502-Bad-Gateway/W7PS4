@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/debug.h"
+#include "common/path_util.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -15,6 +16,9 @@
 #include "video_core/safe_gpu/safe_gpu.h"
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/texture_cache.h"
+
+#include <filesystem>
+#include <fstream>
 
 #ifdef MemoryBarrier
 #undef MemoryBarrier
@@ -82,6 +86,47 @@ void Rasterizer::LogSafeGpuSummary() const {
              safe_gpu_stats.cp_sync_skipped, safe_gpu_stats.image_downloads_skipped);
 }
 
+void Rasterizer::PersistLastSubmittedGraphicsPipeline(const GraphicsPipeline* pipeline,
+                                                      const std::string_view draw_type,
+                                                      const bool is_indexed) {
+    if (!safe_gpu_active || !pipeline) {
+        return;
+    }
+    const u64 pipeline_hash = std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey());
+    if (pipeline_hash == safe_gpu_last_submitted_pipeline_hash) {
+        return;
+    }
+    safe_gpu_last_submitted_pipeline_hash = pipeline_hash;
+
+    const auto directory =
+        Common::FS::GetUserPath(Common::FS::PathType::ShaderDir) / "pipeline_forensics";
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (error) {
+        LOG_ERROR(Render_Vulkan,
+                  "[SafeGPU] could not create persistent last-pipeline directory: {}",
+                  error.message());
+        return;
+    }
+
+    const auto path = directory / "last_submitted_graphics_pipeline.txt";
+    std::ofstream output(path, std::ios::out | std::ios::trunc);
+    if (!output) {
+        LOG_ERROR(Render_Vulkan,
+                  "[SafeGPU] could not open persistent last-pipeline diagnostic file");
+        return;
+    }
+    output << "format_version=1\n";
+    output << "profile=" << VideoCore::SafeGpuGate::GetProfileName() << "\n";
+    output << "pipeline_hash=0x" << std::hex << pipeline_hash << std::dec << "\n";
+    output << "draw_type=" << draw_type << "\n";
+    output << "indexed=" << (is_indexed ? "true" : "false") << "\n";
+    output.flush();
+
+    LOG_WARNING(Render_Vulkan,
+                "[SafeGPU] LAST_SUBMITTED_GRAPHICS profile={} hash={:#x} draw={} indexed={}",
+                VideoCore::SafeGpuGate::GetProfileName(), pipeline_hash, draw_type, is_indexed);
+}
 bool Rasterizer::IsSafeGpuGraphicsPipeline(const GraphicsPipeline* pipeline) const {
     const auto stages = pipeline->GetStages();
     const auto get_stage = [&stages](const Shader::LogicalStage stage) {
@@ -341,6 +386,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    PersistLastSubmittedGraphicsPipeline(pipeline, "direct", is_indexed);
 
     if (is_indexed) {
         cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
@@ -446,6 +492,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    PersistLastSubmittedGraphicsPipeline(pipeline, "indirect", is_indexed);
 
     if (is_indexed) {
         ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
@@ -591,8 +638,36 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     // Bind resource buffers and textures.
     Shader::Backend::Bindings binding{};
     push_data = MakeUserData(liverpool->regs);
+
+    // Build 09-r2: for flat-substituted SafeGPU fragment pipelines, preserve the exact guest
+    // descriptor binding numbers but do not touch any guest fragment resources. The original
+    // fragment metadata remains in the pipeline layout so subsequent stages (notably Vertex)
+    // retain the same binding indices their SPIR-V was compiled against.
+    bool strip_flat_fragment_resources = false;
+    if (safe_gpu_active && !pipeline->IsCompute()) {
+        const auto* graphics_pipeline = static_cast<const GraphicsPipeline*>(pipeline);
+        const u64 pipeline_hash =
+            std::hash<GraphicsPipelineKey>{}(graphics_pipeline->GetGraphicsKey());
+        strip_flat_fragment_resources =
+            VideoCore::SafeGpuGate::ShouldUseFlatFragment(pipeline_hash);
+    }
+
     for (const auto* stage : pipeline->GetStages()) {
         if (!stage) {
+            continue;
+        }
+        if (strip_flat_fragment_resources &&
+            stage->l_stage == Shader::LogicalStage::Fragment) {
+            // Advance the binding cursors exactly as normal fragment binding would, without
+            // creating descriptor writes, resolving guest buffers/images/samplers, transitioning
+            // textures, or copying fragment user-data into push constants.
+            binding.buffer += static_cast<u32>(stage->buffers.size());
+            binding.unified += static_cast<u32>(stage->buffers.size());
+            for (const auto& image : stage->images) {
+                binding.unified += image.NumBindings(*stage);
+            }
+            binding.unified += static_cast<u32>(stage->samplers.size());
+            binding.user_data += stage->ud_mask.NumRegs();
             continue;
         }
         set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +

@@ -14,6 +14,16 @@ enum class EffectiveGpuMode {
     NullGPU,
 };
 
+enum class SafeGpuProfile {
+    Generic,
+    Driveclub,
+    Bloodborne,
+    Doax3,
+    Wipeout,
+    WeAreDoomed,
+    SonicManiaPlus,
+};
+
 struct SafeGpuGraphicsPipelineInfo {
     bool has_vertex_shader{};
     bool has_fragment_shader{};
@@ -41,16 +51,21 @@ struct SafeGpuGraphicsPipelineInfo {
 class SafeGpuGate final {
 public:
     static constexpr std::string_view PolicyVersion() noexcept {
-        return "milestone-2-depthless-color-flat-v1";
+        return "milestone-3-per-title-quarantine-v1";
     }
 
+    static void SetGameSerial(std::string_view game_serial) noexcept;
+    static SafeGpuProfile GetProfile() noexcept;
+    static std::string_view GetProfileName() noexcept;
     static EffectiveGpuMode GetEffectiveMode() noexcept;
     static std::string_view GetEffectiveModeName() noexcept;
     static bool IsEnabled() noexcept;
     static bool ShouldBindGuestRasterizer() noexcept;
     static bool ShouldAllowGraphics() noexcept;
     static bool ShouldAllowGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
+    static bool IsQuarantinedGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
     static bool IsKnownControlGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
+    static bool IsDriveclubNativeSafeGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
     static bool ShouldUseFlatFragment(std::uint64_t pipeline_hash) noexcept;
     static bool ShouldAllowGraphicsPipeline(const SafeGpuGraphicsPipelineInfo& info) noexcept;
     static bool ShouldAllowCompute() noexcept;
