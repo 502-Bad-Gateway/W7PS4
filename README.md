@@ -12,9 +12,13 @@ The current foundation builds and ABI-tests these standalone Windows x64 compone
 - `shadps4_safe_gpu.dll` — conservative graphics controls and scoped fallback policies
 - `shadps4_vulkan_lab.dll` — typed per-game Vulkan overrides and configuration profiles
 - `shadps4_trace_probe.dll` — structured, low-overhead diagnostic event capture
-- `shadps4_trace_collector.exe` — out-of-process trace collection shell
+- `shadps4_trace_collector.exe` — out-of-process crash/exit trace collector
 
-The current bridge can discover, shadow-copy, ABI-validate, initialize and unload the modules before Vulkan startup. Rendering-policy and event callbacks remain deliberately disconnected, so loaded modules are no-override controls in this milestone.
+The current diagnostic milestone assigns one monotonic sequence to every host event, records the
+events in a file-backed shared-memory ring, and preserves both raw and decoded traces after a clean
+exit or forced termination. Initial breadcrumbs cover module lifecycle, final GPU mode, and
+`vkCreateInstance`/`vkCreateDevice` BEGIN/END boundaries. Rendering-policy callbacks remain
+disconnected, so the modules cannot change graphics behavior in this milestone.
 
 > [!IMPORTANT]
 > This is an experimental research fork, not an official upstream shadPS4 support release.

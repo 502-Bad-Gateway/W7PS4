@@ -92,6 +92,9 @@ void Emulator::Shutdown() {
     if (exit_done) {
         return;
     }
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_DIAGNOSTIC,
+                                              SHADPS4_LAB_STAGE_BOOTSTRAP,
+                                              "emulator.shutdown.begin");
     GraphicsLab::Bridge::Instance().Shutdown();
     Common::Log::Flush();
     if (controllers) {
@@ -278,6 +281,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                    std::vector<std::pair<std::filesystem::path, std::string>> mounts,
                    std::vector<std::string> const& env_vars) {
     Common::SetCurrentThreadName("shadPS4:Main");
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_DIAGNOSTIC,
+                                              SHADPS4_LAB_STAGE_BOOTSTRAP,
+                                              "emulator.run.begin");
     if (waitForDebuggerBeforeRun) {
         Debugger::WaitForDebuggerAttach();
     }
@@ -435,6 +441,14 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     EmulatorSettings.Load(id);
     VideoCore::SafeGpuGate::SetGameSerial(id);
+    const std::string game_event = id.empty() ? "game.configuration.loaded:unknown"
+                                               : "game.configuration.loaded:" + id;
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_DIAGNOSTIC,
+                                              SHADPS4_LAB_STAGE_BOOTSTRAP, game_event);
+    const std::string gpu_mode_event =
+        "gpu.effective_mode:" + std::string{VideoCore::SafeGpuGate::GetEffectiveModeName()};
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_POLICY_DECISION,
+                                              SHADPS4_LAB_STAGE_BOOTSTRAP, gpu_mode_event);
 #ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
     LOG_INFO(Config,
              "Windows 7 compatibility-only settings active: null_gpu={}, safe_gpu={}, "

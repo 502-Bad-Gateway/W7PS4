@@ -10,10 +10,12 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -115,6 +117,15 @@ std::uint64_t ProcessId() noexcept {
 #endif
 }
 
+std::uint64_t CurrentThreadId() noexcept {
+#if defined(_WIN32)
+    return static_cast<std::uint64_t>(GetCurrentThreadId());
+#else
+    return static_cast<std::uint64_t>(
+        std::hash<std::thread::id>{}(std::this_thread::get_id()));
+#endif
+}
+
 #if defined(_WIN32)
 using NativeModule = HMODULE;
 
@@ -200,14 +211,75 @@ struct PluginHost::Impl {
         }
     }
 
-    static void HostEmitEvent(void*, const Shadps4LabEventV1*) noexcept {
-        // Event routing is intentionally absent from the discovery-only bridge milestone.
+    static void HostEmitEvent(void* context, const Shadps4LabEventV1* event) noexcept {
+        auto* self = static_cast<Impl*>(context);
+        if (self && event) {
+            self->PublishEvent(*event);
+        }
     }
 
     static std::uint64_t HostMonotonicTime(void*) noexcept {
         const auto now = std::chrono::steady_clock::now().time_since_epoch();
         return static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+    }
+
+    bool PublishEvent(const Shadps4LabEventV1& source) noexcept {
+        if (source.struct_size < sizeof(Shadps4LabEventV1)) {
+            return false;
+        }
+
+        // An observer may report through host.emit_event. Refuse recursive observer dispatch so
+        // a faulty module cannot create an infinite callback loop across the C ABI.
+        static thread_local bool dispatching = false;
+        if (dispatching) {
+            return false;
+        }
+
+        Shadps4LabEventV1 event = source;
+        event.struct_size = sizeof(event);
+        event.sequence = event_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        event.timestamp_ns = HostMonotonicTime(nullptr);
+        if (event.thread_id == 0) {
+            event.thread_id = CurrentThreadId();
+        }
+
+        dispatching = true;
+        bool success = true;
+        for (const auto& loaded : loaded_plugins) {
+            if (!loaded->initialized || !loaded->descriptor ||
+                !(loaded->descriptor->capabilities & SHADPS4_LAB_CAP_OBSERVE_EVENTS) ||
+                !loaded->descriptor->observe_event) {
+                continue;
+            }
+            try {
+                loaded->descriptor->observe_event(&event);
+            } catch (...) {
+                Log(SHADPS4_LAB_LOG_ERROR, "bridge",
+                    "plugin threw while observing event: " + loaded->id);
+                success = false;
+            }
+        }
+        dispatching = false;
+        return success;
+    }
+
+    void PublishPluginLifecycle(const std::string_view action, const std::string_view id,
+                                const std::uint64_t fingerprint) noexcept {
+        try {
+            const std::string name = "plugin." + std::string{action} + ':' + std::string{id};
+            Shadps4LabEventV1 event{};
+            event.struct_size = sizeof(event);
+            event.type = SHADPS4_LAB_EVENT_OBJECT_LIFETIME;
+            event.stage = SHADPS4_LAB_STAGE_BOOTSTRAP;
+            event.object_id = fingerprint;
+            event.name = {name.data(), static_cast<std::uint32_t>(name.size())};
+            event.payload = &fingerprint;
+            event.payload_size = sizeof(fingerprint);
+            PublishEvent(event);
+        } catch (...) {
+            Log(SHADPS4_LAB_LOG_ERROR, "bridge", "could not publish plugin lifecycle event");
+        }
     }
 
     bool CreateSessionDirectory(const std::filesystem::path& shadow_root) {
@@ -374,6 +446,8 @@ struct PluginHost::Impl {
         loaded->initialized = true;
         loaded_plugins.emplace_back(std::move(loaded));
 
+        PublishPluginLifecycle("loaded", id, fingerprint);
+
         std::ostringstream message;
         message << "loaded " << id << " v" << descriptor->plugin_version_major << '.'
                 << descriptor->plugin_version_minor << '.' << descriptor->plugin_version_patch
@@ -384,6 +458,7 @@ struct PluginHost::Impl {
 
     bool Initialize(const PluginHostOptions& options) {
         Shutdown();
+        event_sequence.store(0, std::memory_order_relaxed);
         if (!options.loading_enabled) {
             Log(SHADPS4_LAB_LOG_INFO, "bridge", "plugin discovery disabled by host control");
             return true;
@@ -434,7 +509,7 @@ struct PluginHost::Impl {
             session_directory.clear();
         } else {
             Log(SHADPS4_LAB_LOG_INFO, "bridge",
-                "runtime policy dispatch is disabled; loaded plugins are initialization-only");
+                "observer callbacks active; runtime rendering-policy dispatch is disabled");
         }
         return success;
     }
@@ -442,6 +517,7 @@ struct PluginHost::Impl {
     void Shutdown() noexcept {
         for (auto iterator = loaded_plugins.rbegin(); iterator != loaded_plugins.rend(); ++iterator) {
             auto& loaded = **iterator;
+            PublishPluginLifecycle("unloading", loaded.id, loaded.fingerprint);
             if (loaded.initialized && loaded.descriptor && loaded.descriptor->shutdown) {
                 try {
                     loaded.descriptor->shutdown();
@@ -473,6 +549,7 @@ struct PluginHost::Impl {
     std::filesystem::path session_directory;
     std::vector<std::unique_ptr<LoadedPlugin>> loaded_plugins;
     std::unordered_set<std::string> loaded_ids;
+    std::atomic<std::uint64_t> event_sequence{};
 };
 
 PluginHost::PluginHost(const PluginHostCallbacks callbacks)
@@ -499,6 +576,10 @@ void PluginHost::Shutdown() noexcept {
     impl->Shutdown();
 }
 
+bool PluginHost::PublishEvent(const Shadps4LabEventV1& event) noexcept {
+    return impl->PublishEvent(event);
+}
+
 std::size_t PluginHost::LoadedPluginCount() const noexcept {
     return impl->loaded_plugins.size();
 }
@@ -512,6 +593,10 @@ bool PluginHost::HasPlugin(const Shadps4LabPluginKind kind) const noexcept {
 
 const std::filesystem::path& PluginHost::SessionDirectory() const noexcept {
     return impl->session_directory;
+}
+
+std::uint64_t PluginHost::LastEventSequence() const noexcept {
+    return impl->event_sequence.load(std::memory_order_relaxed);
 }
 
 } // namespace GraphicsLab

@@ -16,12 +16,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPERIMENT_ITERATION: "01"
-  EXPERIMENT_NAME: "bridge-loader"
+  EXPERIMENT_ITERATION: "02"
+  EXPERIMENT_NAME: "flight-recorder"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 discovery-only plugin set
+    name: Build Windows 7 x64 diagnostic flight recorder
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -69,7 +69,8 @@ jobs:
             'shadps4_trace_probe.dll',
             'shadps4_trace_collector.exe',
             'shadps4_lab_plugin_smoke.exe',
-            'shadps4_lab_host_smoke.exe'
+            'shadps4_lab_host_smoke.exe',
+            'shadps4_lab_flight_recorder_smoke.exe'
           )
           foreach ($name in $required) {
             $file = Join-Path $env:GITHUB_WORKSPACE "build/graphics-lab/$name"
@@ -82,14 +83,16 @@ jobs:
           Copy-Item BASELINE-IDENTITY.txt $output
           @"
           Project: shadPS4 Graphics Lab
-          Milestone: discovery-only-bridge-loader
+          Milestone: crash-safe-flight-recorder
           ABI: 1.0
           Source commit: $env:GITHUB_SHA
           Artifact: W7PS4-graphic_lab-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
           Target: Windows 7 SP1 x64
           Modules: shadps4_safe_gpu.dll, shadps4_vulkan_lab.dll, shadps4_trace_probe.dll
           Collector: shadps4_trace_collector.exe
-          Runtime integration: initialization only; policy and event dispatch disconnected
+          Runtime integration: monotonic observational event bus and file-backed shared-memory ring
+          Collector behavior: automatic clean-exit and forced-termination JSONL recovery
+          Rendering policy dispatch: disconnected
           "@ | Out-File -Encoding utf8 (Join-Path $output 'PLUGIN-IDENTITY.txt')
 
       - name: Upload plugin-only artifact

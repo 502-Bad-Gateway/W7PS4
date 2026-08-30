@@ -125,6 +125,8 @@ bool CheckPlugin(const char* path, const Shadps4LabHostV1& host) {
         Shadps4LabEventV1 event{};
         event.struct_size = sizeof(event);
         event.type = SHADPS4_LAB_EVENT_DIAGNOSTIC;
+        event.sequence = 1;
+        event.timestamp_ns = HostMonotonicTime(nullptr);
         plugin->observe_event(&event);
     }
 
@@ -154,4 +156,3 @@ int main(const int argc, const char* const argv[]) {
     }
     return success ? 0 : 1;
 }
-

@@ -145,8 +145,8 @@ int main(int argc, char* argv[]) {
 
     LOG_INFO(Debug, "Run: {}", std::span(argv, argc));
 
-    // Discovery-only milestone: load and validate shadow-copied modules before any Vulkan
-    // construction. No rendering-policy callback is connected in this build.
+    // Load the diagnostic bridge before Vulkan construction. Rendering-policy callbacks remain
+    // disconnected; this milestone only publishes observational events.
     GraphicsLab::Bridge::Instance().Initialize(argv[0]);
 
     IPC::Instance().Init();
@@ -163,6 +163,9 @@ int main(int argc, char* argv[]) {
     std::shared_ptr<EmulatorSettingsImpl> emu_settings = std::make_shared<EmulatorSettingsImpl>();
     EmulatorSettingsImpl::SetInstance(emu_settings);
     emu_settings->Load();
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_DIAGNOSTIC,
+                                              SHADPS4_LAB_STAGE_BOOTSTRAP,
+                                              "configuration.global.loaded");
 
     // Configure logger appropriately
     Common::Log::g_should_append |= EmulatorSettings.IsLogAppend();

@@ -84,11 +84,13 @@ bool Bridge::Initialize(const std::filesystem::path& executable_path) noexcept {
     options.loading_enabled = !IsDisabledByEnvironment();
 
     LOG_INFO(Config,
-             "[GraphicsLab] bridge milestone: discovery and ABI validation only; runtime policy "
-             "dispatch disabled");
+             "[GraphicsLab] diagnostic flight-recorder milestone; rendering policy dispatch "
+             "disabled");
     const bool success = host.Initialize(options);
     initialized = true;
     LOG_INFO(Config, "[GraphicsLab] initialized with {} plugin(s)", host.LoadedPluginCount());
+    EmitEvent(SHADPS4_LAB_EVENT_DIAGNOSTIC, SHADPS4_LAB_STAGE_BOOTSTRAP,
+              "bridge.initialized", static_cast<std::int32_t>(host.LoadedPluginCount()));
     if (!success) {
         LOG_WARNING(Config,
                     "[GraphicsLab] one or more modules were rejected; emulator behavior remains "
@@ -101,12 +103,40 @@ void Bridge::Shutdown() noexcept {
     if (!initialized) {
         return;
     }
+    EmitEvent(SHADPS4_LAB_EVENT_DIAGNOSTIC, SHADPS4_LAB_STAGE_BOOTSTRAP,
+              "bridge.shutdown.begin");
     host.Shutdown();
     initialized = false;
 }
 
+void Bridge::EmitEvent(const Shadps4LabEventType type, const Shadps4LabStage stage,
+                       const std::string_view name, const std::int32_t result_code,
+                       const std::uint64_t object_id, const std::uint64_t frame_id,
+                       const std::uint64_t submission_id, const std::uint64_t pipeline_hash,
+                       const std::uint64_t shader_hash) noexcept {
+    if (!initialized) {
+        return;
+    }
+    Shadps4LabEventV1 event{};
+    event.struct_size = sizeof(event);
+    event.type = type;
+    event.stage = stage;
+    event.result_code = result_code;
+    event.object_id = object_id;
+    event.frame_id = frame_id;
+    event.submission_id = submission_id;
+    event.pipeline_hash = pipeline_hash;
+    event.shader_hash = shader_hash;
+    event.name = {name.data(), static_cast<std::uint32_t>(name.size())};
+    host.PublishEvent(event);
+}
+
 std::size_t Bridge::LoadedPluginCount() const noexcept {
     return host.LoadedPluginCount();
+}
+
+std::uint64_t Bridge::LastEventSequence() const noexcept {
+    return host.LastEventSequence();
 }
 
 void Bridge::Log(void*, const Shadps4LabLogLevel level, const std::string_view component,

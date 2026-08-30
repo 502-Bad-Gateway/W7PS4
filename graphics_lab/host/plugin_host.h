@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string_view>
@@ -37,14 +38,17 @@ public:
     PluginHost(PluginHost&&) = delete;
     PluginHost& operator=(PluginHost&&) = delete;
 
-    // Discovery and initialization only. This host intentionally exposes no policy-dispatch
-    // method during the bridge-loader milestone.
     bool Initialize(const PluginHostOptions& options) noexcept;
     void Shutdown() noexcept;
+
+    // Events are observational. The host replaces sequence, timestamp and missing thread ID
+    // before dispatching a borrowed event to every loaded observer.
+    bool PublishEvent(const Shadps4LabEventV1& event) noexcept;
 
     [[nodiscard]] std::size_t LoadedPluginCount() const noexcept;
     [[nodiscard]] bool HasPlugin(Shadps4LabPluginKind kind) const noexcept;
     [[nodiscard]] const std::filesystem::path& SessionDirectory() const noexcept;
+    [[nodiscard]] std::uint64_t LastEventSequence() const noexcept;
 
 private:
     struct Impl;

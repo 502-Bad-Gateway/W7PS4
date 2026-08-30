@@ -88,6 +88,8 @@ struct RunContext {
     std::wstring started_at;
     bool null_gpu = false;
     bool safe_gpu = false;
+    DWORD process_id = 0;
+    FILETIME process_started_filetime{};
     uint64_t shadps4_log_start = 0;
     uint64_t shad_log_start = 0;
 };
@@ -1357,6 +1359,84 @@ void CopyRunLog(const std::wstring& source, const std::wstring& destination, uin
     CloseHandle(input);
 }
 
+bool IsCurrentRunFile(const WIN32_FIND_DATAW& data, const FILETIME& not_before) {
+    return (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
+           CompareFileTime(&data.ftCreationTime, &not_before) >= 0;
+}
+
+bool HasMatchingFile(const std::wstring& directory, const std::wstring& wildcard,
+                     const FILETIME& not_before) {
+    WIN32_FIND_DATAW data{};
+    HANDLE search = FindFirstFileW(JoinPath(directory, wildcard).c_str(), &data);
+    if (search == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    bool found = false;
+    do {
+        if (IsCurrentRunFile(data, not_before)) {
+            found = true;
+            break;
+        }
+    } while (FindNextFileW(search, &data));
+    FindClose(search);
+    return found;
+}
+
+size_t CopyMatchingFiles(const std::wstring& source_directory,
+                         const std::wstring& wildcard,
+                         const std::wstring& destination_directory,
+                         const FILETIME& not_before) {
+    WIN32_FIND_DATAW data{};
+    HANDLE search = FindFirstFileW(JoinPath(source_directory, wildcard).c_str(), &data);
+    if (search == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    size_t copied = 0;
+    do {
+        if (!IsCurrentRunFile(data, not_before)) {
+            continue;
+        }
+        if (CopyFileW(JoinPath(source_directory, data.cFileName).c_str(),
+                      JoinPath(destination_directory, data.cFileName).c_str(), FALSE)) {
+            ++copied;
+        }
+    } while (FindNextFileW(search, &data));
+    FindClose(search);
+    return copied;
+}
+
+size_t CollectGraphicsLabTraces(const RunContext& context) {
+    if (context.process_id == 0) {
+        return 0;
+    }
+    const std::wstring trace_directory =
+        JoinPath(JoinPath(context.data_root, L"log"), L"graphics_lab");
+    const std::wstring prefix = L"flight-" + std::to_wstring(context.process_id) + L"-*";
+    if (!HasMatchingFile(trace_directory, prefix + L".glfr",
+                         context.process_started_filetime)) {
+        return 0;
+    }
+
+    // A clean shutdown is marked before shadPS4 exits. Give the detached collector a bounded
+    // interval to publish JSONL and its completion marker; always retain the raw recorder.
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        if (HasMatchingFile(trace_directory, prefix + L".done",
+                            context.process_started_filetime)) {
+            break;
+        }
+        Sleep(50);
+    }
+
+    size_t copied = 0;
+    copied += CopyMatchingFiles(trace_directory, prefix + L".glfr", context.result_dir,
+                                context.process_started_filetime);
+    copied += CopyMatchingFiles(trace_directory, prefix + L".jsonl", context.result_dir,
+                                context.process_started_filetime);
+    copied += CopyMatchingFiles(trace_directory, prefix + L".done", context.result_dir,
+                                context.process_started_filetime);
+    return copied;
+}
+
 unsigned __stdcall WaitForRun(void* parameter) {
     auto* context = static_cast<RunContext*>(parameter);
     WaitForSingleObject(context->process, INFINITE);
@@ -1373,6 +1453,7 @@ unsigned __stdcall WaitForRun(void* parameter) {
                JoinPath(context->result_dir,
                         L"shad_log-" + context->title_id + L"-" + context->mode + L".txt"),
                context->shad_log_start);
+    const size_t graphics_lab_trace_files = CollectGraphicsLabTraces(*context);
 
     const std::wstring dump = JoinPath(context->exe_dir, L"shadps4-crash.dmp");
     if (FileExists(dump)) {
@@ -1399,6 +1480,8 @@ unsigned __stdcall WaitForRun(void* parameter) {
     run_info["started_at"] = WideToUtf8(context->started_at);
     run_info["finished_at"] = WideToUtf8(IsoTimestampNow());
     run_info["exit_code"] = exit_code;
+    run_info["graphics_lab_trace_pid"] = context->process_id;
+    run_info["graphics_lab_trace_files"] = graphics_lab_trace_files;
     run_info["data_root"] = WideToUtf8(context->data_root);
     run_info["shadps4_exe"] = WideToUtf8(JoinPath(context->exe_dir, L"shadps4.exe"));
     SaveJson(JoinPath(context->result_dir, L"run-info.json"), run_info, false, &ignored);
@@ -1502,6 +1585,8 @@ void LaunchGame() {
     std::vector<wchar_t> command_buffer(command.begin(), command.end());
     command_buffer.push_back(L'\0');
     PROCESS_INFORMATION process{};
+    FILETIME process_started_filetime{};
+    GetSystemTimeAsFileTime(&process_started_filetime);
     const BOOL created = CreateProcessW(
         g_shadps4_exe.c_str(), command_buffer.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
         nullptr, g_exe_dir.c_str(), &startup, &process);
@@ -1532,6 +1617,8 @@ void LaunchGame() {
     context->started_at = IsoTimestampNow();
     context->null_gpu = gpu_mode.null_gpu;
     context->safe_gpu = gpu_mode.safe_gpu;
+    context->process_id = process.dwProcessId;
+    context->process_started_filetime = process_started_filetime;
     context->shadps4_log_start = shadps4_log_start;
     context->shad_log_start = shad_log_start;
 

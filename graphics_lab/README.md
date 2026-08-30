@@ -5,12 +5,24 @@ This directory is the isolated, standalone foundation for three runtime modules:
 - `shadps4_safe_gpu`: fail-closed GPU operation policy;
 - `shadps4_vulkan_lab`: deep Vulkan configuration and fallback policy;
 - `shadps4_trace_probe`: structured diagnostic-event observer;
-- `shadps4_trace_collector`: future out-of-process crash-safe collector.
+- `shadps4_trace_collector`: out-of-process crash-safe collector and JSONL decoder.
 
-The current milestone establishes a discovery-only host in `shadps4.exe`. It shadow-copies,
-ABI-validates, initializes and unloads recognized modules before Vulkan startup. It does **not**
-call their configuration, policy or event callbacks, alter Vulkan behavior, write a crash-safe
-trace, or replace the tested Build 11 SafeGPU implementation.
+The current milestone adds an observational host event bus and a file-backed shared-memory flight
+recorder. The trace probe receives lifecycle, configuration and initial Vulkan driver-boundary
+events. Every event receives one host-assigned monotonic sequence and is copied into a fixed-size
+record before the callback returns. The collector produces JSONL after a clean exit or detects the
+producer process ending after a crash/forced termination. It does **not** call rendering-policy
+callbacks, alter Vulkan behavior, or replace the tested Build 11 SafeGPU implementation.
+
+The raw `.glfr`, decoded `.jsonl`, and `.done` summary files are written below
+`user/log/graphics_lab` in portable mode (otherwise the normal shadPS4 data directory). The Windows
+7 launcher copies the matching files into that run's `test-results` directory.
+
+An existing raw recorder can also be decoded manually:
+
+```text
+shadps4_trace_collector --decode flight-session.glfr flight-session.jsonl
+```
 
 ## Standalone build
 
@@ -35,9 +47,10 @@ Windows APIs newer than Windows 7 in the module implementations.
 - `null_gpu` precedence belongs to the host and is also honored by the SafeGPU foundation policy.
 - Unknown SafeGPU operations fail closed.
 
-## Current integration gate
+## Integration gate
 
 The exact CI-time Build 09-r2, Build 10 and Build 11 transformations are materialized in ordinary
-source and identified by `ci/build11-materialized.json`. Milestone B passes only when both the
-disabled path and the loaded initialization-only path remain behaviorally identical to that
-materialized control on the target Windows 7 machine.
+source and identified by `ci/build11-materialized.json`. The discovery-only loaded/disabled control
+was physically validated on the target Windows 7 machine. This diagnostic milestone must keep that
+rendering behavior unchanged while the loaded path produces ordered `.glfr`, `.jsonl`, and `.done`
+outputs and the disabled path produces no Graphics Lab trace.

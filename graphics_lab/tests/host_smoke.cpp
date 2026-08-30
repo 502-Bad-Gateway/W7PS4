@@ -83,6 +83,21 @@ int main(const int argc, const char* const argv[]) {
         return Fail("host did not load exactly one plugin of every required kind") ? 0 : 1;
     }
 
+    const auto lifecycle_sequence = host.LastEventSequence();
+    Shadps4LabEventV1 diagnostic{};
+    diagnostic.struct_size = sizeof(diagnostic);
+    diagnostic.type = SHADPS4_LAB_EVENT_DIAGNOSTIC;
+    diagnostic.stage = SHADPS4_LAB_STAGE_BOOTSTRAP;
+    diagnostic.sequence = 9999;
+    diagnostic.timestamp_ns = 9999;
+    static constexpr std::string_view diagnostic_name{"host.smoke.event"};
+    diagnostic.name = {diagnostic_name.data(),
+                       static_cast<std::uint32_t>(diagnostic_name.size())};
+    if (!host.PublishEvent(diagnostic) || lifecycle_sequence < 3 ||
+        host.LastEventSequence() != lifecycle_sequence + 1) {
+        return Fail("host event bus did not assign one global monotonic sequence") ? 0 : 1;
+    }
+
     const auto session_directory = host.SessionDirectory();
     if (session_directory.empty() || !std::filesystem::is_directory(session_directory)) {
         return Fail("host did not create a live shadow-copy session") ? 0 : 1;
@@ -146,7 +161,7 @@ int main(const int argc, const char* const argv[]) {
 
     error.clear();
     std::filesystem::remove_all(shadow_root, error);
-    std::cout << "Validated discovery-only host, ABI/kind rejection, shadow copy and disabled "
+    std::cout << "Validated host event sequencing, ABI/kind rejection, shadow copy and disabled "
                  "control\n";
     return 0;
 }

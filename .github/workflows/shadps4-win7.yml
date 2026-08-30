@@ -7,6 +7,7 @@ on:
     paths:
       - CMakeLists.txt
       - src/**
+      - graphics_lab/**
       - tools/win7-launcher/**
       - ci/build11-materialized.json
       - .github/workflows/shadps4-win7.yml
@@ -19,12 +20,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPERIMENT_ITERATION: "01"
-  EXPERIMENT_NAME: "bridge-loader"
+  EXPERIMENT_ITERATION: "02"
+  EXPERIMENT_NAME: "flight-recorder"
 
 jobs:
   build-win7-x64:
-    name: Build discovery-only bridge for Windows 7 x64
+    name: Build diagnostic flight recorder for Windows 7 x64
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -195,6 +196,7 @@ jobs:
           }
           Copy-Item 'build/graphics-lab/shadps4_trace_collector.exe' $labRoot
           Copy-Item 'build/graphics-lab/shadps4_lab_host_smoke.exe' $toolDirectory
+          Copy-Item 'build/graphics-lab/shadps4_lab_flight_recorder_smoke.exe' $toolDirectory
           Copy-Item 'graphics_lab/profiles' (Join-Path $labRoot 'profiles') -Recurse
           Get-ChildItem 'build/graphics-lab' -File -Filter '*.pdb' |
             Copy-Item -Destination $toolDirectory
@@ -203,25 +205,34 @@ jobs:
           @echo off
           set "SHADPS4_GRAPHICS_LAB_DISABLE="
           "%~dp0shadps4-win7-launcher.exe"
-          '@ | Out-File -Encoding ascii (Join-Path $output 'run_bridge_loaded.bat')
+          '@ | Out-File -Encoding ascii (Join-Path $output 'run_diagnostic_loaded.bat')
           @'
           @echo off
           set "SHADPS4_GRAPHICS_LAB_DISABLE=1"
           "%~dp0shadps4-win7-launcher.exe"
-          '@ | Out-File -Encoding ascii (Join-Path $output 'run_bridge_disabled.bat')
+          '@ | Out-File -Encoding ascii (Join-Path $output 'run_diagnostic_disabled.bat')
           @'
-          Milestone B control paths
+          Milestone C1 diagnostic flight-recorder controls
 
-          run_bridge_disabled.bat: bridge discovers no modules by explicit host control.
-          run_bridge_loaded.bat: three shadow-copied modules initialize, but no policy or event
-          callback is connected to rendering in this milestone.
+          run_diagnostic_disabled.bat: bridge discovers no modules and writes no Graphics Lab trace.
+          run_diagnostic_loaded.bat: three shadow-copied modules initialize and the trace probe
+          records observational events. Rendering-policy dispatch remains disconnected.
 
           Expected loaded-path log:
           [GraphicsLab] initialized with 3 plugin(s)
+          [GraphicsLab:trace_probe] crash-safe flight recorder active:
 
           Expected disabled-path log:
           [GraphicsLab] initialized with 0 plugin(s)
-          '@ | Out-File -Encoding utf8 (Join-Path $output 'BRIDGE-TEST.txt')
+
+          After shadPS4 exits, click Last results in the launcher. The loaded run should contain:
+          flight-<pid>-<timestamp>.glfr
+          flight-<pid>-<timestamp>.jsonl
+          flight-<pid>-<timestamp>.done
+
+          The JSONL session line should report clean_shutdown=true after a normal exit. A forced
+          termination should still produce JSONL with clean_shutdown=false.
+          '@ | Out-File -Encoding utf8 (Join-Path $output 'DIAGNOSTIC-TEST.txt')
 
           $manifest = Get-Content 'ci/build11-materialized.json' -Raw | ConvertFrom-Json
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
@@ -237,7 +248,8 @@ jobs:
           Historical source head: $($manifest.historical_source_head)
           Build 11 transform parent: $($manifest.build11_transform_parent)
           Materialized source diff: $($manifest.source_diff_git_blob)
-          Runtime plugin integration: discovery, shadow copy, ABI validation and lifecycle only
+          Runtime plugin integration: discovery, shadow copy, ABI validation and event observation
+          Diagnostic recorder: file-backed shared-memory ring with out-of-process JSONL collector
           Runtime policy dispatch: disabled
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 

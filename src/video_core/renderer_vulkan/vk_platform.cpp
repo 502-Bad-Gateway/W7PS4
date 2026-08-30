@@ -20,6 +20,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
+#include "graphics_lab/bridge.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
@@ -423,7 +424,13 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
         },
     };
 
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                                              SHADPS4_LAB_STAGE_INSTANCE,
+                                              "vkCreateInstance");
     auto [instance_result, instance] = vk::createInstanceUnique(instance_ci_chain.get());
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_DRIVER_CALL_END, SHADPS4_LAB_STAGE_INSTANCE, "vkCreateInstance",
+        static_cast<std::int32_t>(instance_result));
     ASSERT_MSG(instance_result == vk::Result::eSuccess, "Failed to create instance: {}",
                vk::to_string(instance_result));
 

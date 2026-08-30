@@ -8,6 +8,7 @@
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/types.h"
+#include "graphics_lab/bridge.h"
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -781,7 +782,12 @@ bool Instance::CreateDevice() {
         device_chain.unlink<vk::PhysicalDeviceImageViewMinLodFeaturesEXT>();
     }
 
+    GraphicsLab::Bridge::Instance().EmitEvent(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                                              SHADPS4_LAB_STAGE_DEVICE, "vkCreateDevice");
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_DRIVER_CALL_END, SHADPS4_LAB_STAGE_DEVICE, "vkCreateDevice",
+        static_cast<std::int32_t>(device_result));
     if (device_result != vk::Result::eSuccess) {
         LOG_CRITICAL(Render_Vulkan, "Failed to create device: {}", vk::to_string(device_result));
         return false;

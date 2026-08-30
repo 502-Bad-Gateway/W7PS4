@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 cmake_minimum_required(VERSION 3.20)
-project(shadps4_graphics_lab VERSION 0.1.0 LANGUAGES CXX)
+project(shadps4_graphics_lab VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,8 +44,15 @@ shadps4_lab_add_plugin(shadps4_lab_vulkan
 shadps4_lab_add_plugin(shadps4_lab_trace_probe
     plugins/trace_probe/plugin.cpp
     shadps4_trace_probe)
+target_sources(shadps4_lab_trace_probe PRIVATE diagnostics/flight_recorder.cpp)
+target_include_directories(shadps4_lab_trace_probe PRIVATE diagnostics)
 
-add_executable(shadps4_trace_collector diagnostics/collector/main.cpp)
+find_package(Threads REQUIRED)
+add_executable(shadps4_trace_collector
+    diagnostics/collector/main.cpp
+    diagnostics/flight_recorder_reader.cpp)
+target_include_directories(shadps4_trace_collector PRIVATE diagnostics include)
+target_link_libraries(shadps4_trace_collector PRIVATE Threads::Threads)
 shadps4_lab_target_win7(shadps4_trace_collector)
 if(MSVC)
     target_compile_options(shadps4_trace_collector PRIVATE /W4 /permissive-)
@@ -96,6 +103,33 @@ if(SHADPS4_LAB_BUILD_TESTS)
             $<TARGET_FILE_DIR:shadps4_lab_safe_gpu>
             $<TARGET_FILE_DIR:shadps4_lab_host_smoke>/host-shadow
             $<TARGET_FILE:shadps4_lab_incompatible_fixture>)
+
+    add_executable(shadps4_lab_flight_recorder_smoke
+        tests/flight_recorder_smoke.cpp
+        diagnostics/flight_recorder.cpp
+        diagnostics/flight_recorder_reader.cpp)
+    target_include_directories(shadps4_lab_flight_recorder_smoke PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/diagnostics)
+    shadps4_lab_target_win7(shadps4_lab_flight_recorder_smoke)
+    if(MSVC)
+        target_compile_options(shadps4_lab_flight_recorder_smoke PRIVATE /W4 /permissive-)
+        target_link_options(shadps4_lab_flight_recorder_smoke PRIVATE /SUBSYSTEM:CONSOLE,6.01)
+    else()
+        target_compile_options(shadps4_lab_flight_recorder_smoke PRIVATE
+            -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME shadps4_lab_flight_recorder_recovery_smoke
+        COMMAND shadps4_lab_flight_recorder_smoke
+            ${CMAKE_CURRENT_BINARY_DIR}/flight-recorder-smoke)
+
+    set(_shadps4_lab_test_environment
+        "SHADPS4_GRAPHICS_LAB_TRACE_ROOT=${CMAKE_CURRENT_BINARY_DIR}/test-traces"
+        "SHADPS4_GRAPHICS_LAB_TRACE_NO_COLLECTOR=1")
+    set_tests_properties(
+        shadps4_lab_plugin_abi_smoke
+        shadps4_lab_host_shadow_copy_smoke
+        PROPERTIES ENVIRONMENT "${_shadps4_lab_test_environment}")
 endif()
 
 install(TARGETS
