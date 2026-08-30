@@ -15,6 +15,10 @@ concurrency:
   group: graphics-lab-plugins-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  EXPERIMENT_ITERATION: "00"
+  EXPERIMENT_NAME: "foundation"
+
 jobs:
   build-win7-x64:
     name: Build Windows 7 x64 plugin foundation
@@ -80,6 +84,7 @@ jobs:
           Milestone: standalone-plugin-abi-foundation
           ABI: 1.0
           Source commit: $env:GITHUB_SHA
+          Artifact: W7PS4-graphic_lab-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
           Target: Windows 7 SP1 x64
           Modules: shadps4_safe_gpu.dll, shadps4_vulkan_lab.dll, shadps4_trace_probe.dll
           Collector: shadps4_trace_collector.exe
@@ -89,5 +94,5 @@ jobs:
       - name: Upload plugin-only artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadPS4-GraphicsLab-plugin-foundation-${{ github.sha }}
+          name: W7PS4-graphic_lab-${{ env.EXPERIMENT_ITERATION }}-${{ env.EXPERIMENT_NAME }}
           path: graphics-lab-artifact

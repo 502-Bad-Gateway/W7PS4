@@ -16,8 +16,6 @@ The current foundation builds and ABI-tests these standalone Windows x64 compone
 
 Runtime loading from `shadPS4.exe` is intentionally **not active yet**. This milestone establishes the versioned plugin boundary, profiles, safety model, independent build, and smoke-test path before emulator integration.
 
-Start with [the continuation guide](docs/START_HERE_shadPS4_Graphics_Lab.md), then read [the architecture note](docs/shadPS4_Graphics_Lab_Architecture.txt). Exact source provenance is recorded in [BASELINE-IDENTITY.txt](BASELINE-IDENTITY.txt), and the GitHub publication model is documented in [GITHUB-PUBLICATION-NOTE.md](GITHUB-PUBLICATION-NOTE.md).
-
 > [!IMPORTANT]
 > This is an experimental research fork, not an official upstream shadPS4 support release.
 
