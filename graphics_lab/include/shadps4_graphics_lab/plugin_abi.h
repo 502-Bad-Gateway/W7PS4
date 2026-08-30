@@ -181,7 +181,7 @@ enum {
 
 typedef struct Shadps4LabCrashPayloadV1 {
     uint32_t struct_size;
-    uint32_t exception_code;
+    uint32_t win32_exception_code;
     Shadps4LabCrashAccessType access_type;
     uint32_t reserved;
     uint64_t instruction_address;

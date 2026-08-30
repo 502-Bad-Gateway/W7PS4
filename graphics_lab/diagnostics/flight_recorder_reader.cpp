@@ -224,8 +224,9 @@ void WriteKnownPayload(std::ostream& output, const FlightRecord& record) {
         Shadps4LabCrashPayloadV1 payload{};
         std::memcpy(&payload, record.payload, sizeof(payload));
         if (payload.struct_size >= sizeof(payload)) {
-            output << ",\"crash\":{\"exception_code\":" << payload.exception_code
-                   << ",\"exception_code_hex\":\"" << HexValue(payload.exception_code)
+            output << ",\"crash\":{\"exception_code\":" << payload.win32_exception_code
+                   << ",\"exception_code_hex\":\""
+                   << HexValue(payload.win32_exception_code)
                    << "\",\"access_type\":\"" << CrashAccessName(payload.access_type)
                    << "\",\"instruction_address\":" << payload.instruction_address
                    << ",\"instruction_address_hex\":\""

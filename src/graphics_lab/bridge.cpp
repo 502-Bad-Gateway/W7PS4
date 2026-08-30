@@ -134,14 +134,14 @@ void Bridge::EmitEvent(const Shadps4LabEventType type, const Shadps4LabStage sta
     host.PublishEvent(event);
 }
 
-void Bridge::EmitCrash(const std::uint32_t exception_code,
+void Bridge::EmitCrash(const std::uint32_t win32_exception_code,
                        const Shadps4LabCrashAccessType access_type,
                        const std::uint64_t instruction_address,
                        const std::uint64_t fault_address,
                        const std::uint64_t module_base) noexcept {
     const Shadps4LabCrashPayloadV1 payload{
         .struct_size = sizeof(Shadps4LabCrashPayloadV1),
-        .exception_code = exception_code,
+        .win32_exception_code = win32_exception_code,
         .access_type = access_type,
         .reserved = 0,
         .instruction_address = instruction_address,
@@ -149,8 +149,8 @@ void Bridge::EmitCrash(const std::uint32_t exception_code,
         .module_base = module_base,
     };
     EmitEvent(SHADPS4_LAB_EVENT_CRASH, SHADPS4_LAB_STAGE_UNKNOWN,
-              "process.unhandled_exception", static_cast<std::int32_t>(exception_code), 0, 0, 0,
-              0, 0, &payload, sizeof(payload));
+              "process.unhandled_exception", static_cast<std::int32_t>(win32_exception_code), 0,
+              0, 0, 0, 0, &payload, sizeof(payload));
 }
 
 std::size_t Bridge::LoadedPluginCount() const noexcept {

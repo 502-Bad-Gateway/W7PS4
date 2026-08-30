@@ -21,7 +21,7 @@ enum class ProducerState : std::uint32_t {
 };
 
 struct FlightRecorderCrashInfo {
-    std::uint32_t exception_code{};
+    std::uint32_t win32_exception_code{};
     std::uint32_t access_type{};
     std::uint64_t thread_id{};
     std::uint64_t instruction_address{};

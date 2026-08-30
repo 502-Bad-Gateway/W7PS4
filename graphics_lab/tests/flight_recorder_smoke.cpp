@@ -109,7 +109,7 @@ int main(const int argc, const char* const argv[]) {
     }
     Shadps4LabCrashPayloadV1 crash_payload{};
     crash_payload.struct_size = sizeof(Shadps4LabCrashPayloadV1);
-    crash_payload.exception_code = 0xc0000005u;
+    crash_payload.win32_exception_code = 0xc0000005u;
     crash_payload.access_type = SHADPS4_LAB_CRASH_ACCESS_READ;
     crash_payload.instruction_address = 0x7fecf20a298ull;
     crash_payload.fault_address = 0xffffffffffffffffull;
@@ -122,7 +122,8 @@ int main(const int argc, const char* const argv[]) {
     crash_event.timestamp_ns = 1234;
     crash_event.thread_id = 10644;
     crash_event.stage = SHADPS4_LAB_STAGE_UNKNOWN;
-    crash_event.result_code = static_cast<std::int32_t>(crash_payload.exception_code);
+    crash_event.result_code =
+        static_cast<std::int32_t>(crash_payload.win32_exception_code);
     crash_event.name = {crash_name.data(), static_cast<std::uint32_t>(crash_name.size())};
     crash_event.payload = &crash_payload;
     crash_event.payload_size = sizeof(crash_payload);
@@ -164,7 +165,7 @@ int main(const int argc, const char* const argv[]) {
     recorder.Record(submit_event);
     recorder.Record(crash_event);
     GraphicsLab::Diagnostics::FlightRecorderCrashInfo crash_info{};
-    crash_info.exception_code = crash_payload.exception_code;
+    crash_info.win32_exception_code = crash_payload.win32_exception_code;
     crash_info.access_type = crash_payload.access_type;
     crash_info.thread_id = crash_event.thread_id;
     crash_info.instruction_address = crash_payload.instruction_address;
@@ -180,7 +181,7 @@ int main(const int argc, const char* const argv[]) {
     if (summary.clean_shutdown || !summary.crashed ||
         summary.producer_state !=
             static_cast<std::uint32_t>(GraphicsLab::Diagnostics::ProducerState::Crashed) ||
-        summary.crash_exception_code != crash_payload.exception_code ||
+        summary.crash_exception_code != crash_payload.win32_exception_code ||
         summary.crash_access_type != crash_payload.access_type ||
         summary.crash_thread_id != crash_event.thread_id ||
         summary.crash_instruction_address != crash_payload.instruction_address ||

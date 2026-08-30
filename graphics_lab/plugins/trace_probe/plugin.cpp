@@ -367,12 +367,12 @@ void Observe(const Shadps4LabEventV1* event) noexcept {
         if (event->type == SHADPS4_LAB_EVENT_CRASH) {
             FlightRecorderCrashInfo crash{};
             crash.thread_id = event->thread_id;
-            crash.exception_code = static_cast<std::uint32_t>(event->result_code);
+            crash.win32_exception_code = static_cast<std::uint32_t>(event->result_code);
             if (event->payload && event->payload_size >= sizeof(Shadps4LabCrashPayloadV1)) {
                 Shadps4LabCrashPayloadV1 payload{};
                 std::memcpy(&payload, event->payload, sizeof(payload));
                 if (payload.struct_size >= sizeof(payload)) {
-                    crash.exception_code = payload.exception_code;
+                    crash.win32_exception_code = payload.win32_exception_code;
                     crash.access_type = payload.access_type;
                     crash.instruction_address = payload.instruction_address;
                     crash.fault_address = payload.fault_address;

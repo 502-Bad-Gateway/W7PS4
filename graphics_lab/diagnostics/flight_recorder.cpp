@@ -320,7 +320,7 @@ void FlightRecorder::MarkCrashed(const FlightRecorderCrashInfo& crash) noexcept 
     if (!impl->header) {
         return;
     }
-    AtomicStore(&impl->header->crash_exception_code, crash.exception_code);
+    AtomicStore(&impl->header->crash_exception_code, crash.win32_exception_code);
     AtomicStore(&impl->header->crash_access_type, crash.access_type);
     AtomicStore(&impl->header->crash_thread_id, crash.thread_id);
     AtomicStore(&impl->header->crash_instruction_address, crash.instruction_address);
