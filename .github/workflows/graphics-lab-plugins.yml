@@ -1,0 +1,89 @@
+name: Build shadPS4 Graphics Lab plugins
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - graphics_lab/**
+      - .github/workflows/graphics-lab-plugins.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7-x64:
+    name: Build Windows 7 x64 plugin foundation
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Setup Visual Studio build environment
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+
+      - name: Configure standalone modules
+        shell: pwsh
+        run: |
+          cmake -S graphics_lab -B build/graphics-lab -G Ninja `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSHADPS4_LAB_BUILD_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics Lab configure failed' }
+
+      - name: Build standalone modules
+        shell: pwsh
+        run: |
+          cmake --build build/graphics-lab --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics Lab build failed' }
+
+      - name: Validate plugin ABI
+        shell: pwsh
+        run: |
+          ctest --test-dir build/graphics-lab --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics Lab ABI smoke test failed' }
+
+      - name: Package plugin-only artifact
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'graphics-lab-artifact'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $required = @(
+            'shadps4_safe_gpu.dll',
+            'shadps4_vulkan_lab.dll',
+            'shadps4_trace_probe.dll',
+            'shadps4_trace_collector.exe',
+            'shadps4_lab_plugin_smoke.exe'
+          )
+          foreach ($name in $required) {
+            $file = Join-Path $env:GITHUB_WORKSPACE "build/graphics-lab/$name"
+            if (!(Test-Path $file)) { throw "Required Graphics Lab output missing: $name" }
+            Copy-Item $file $output
+          }
+          Get-ChildItem build/graphics-lab -File -Filter '*.pdb' |
+            Copy-Item -Destination $output
+          Copy-Item graphics_lab/profiles (Join-Path $output 'profiles') -Recurse
+          Copy-Item BASELINE-IDENTITY.txt $output
+          @"
+          Project: shadPS4 Graphics Lab
+          Milestone: standalone-plugin-abi-foundation
+          ABI: 1.0
+          Source commit: $env:GITHUB_SHA
+          Target: Windows 7 SP1 x64
+          Modules: shadps4_safe_gpu.dll, shadps4_vulkan_lab.dll, shadps4_trace_probe.dll
+          Collector: shadps4_trace_collector.exe
+          Runtime integration: not active in this milestone
+          "@ | Out-File -Encoding utf8 (Join-Path $output 'PLUGIN-IDENTITY.txt')
+
+      - name: Upload plugin-only artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: shadPS4-GraphicsLab-plugin-foundation-${{ github.sha }}
+          path: graphics-lab-artifact
