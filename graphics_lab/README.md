@@ -7,10 +7,10 @@ This directory is the isolated, standalone foundation for three runtime modules:
 - `shadps4_trace_probe`: structured diagnostic-event observer;
 - `shadps4_trace_collector`: future out-of-process crash-safe collector.
 
-The current milestone establishes and tests a versioned C ABI. It does **not** yet load these
-modules from `shadps4.exe`, alter Vulkan behavior, write a crash-safe trace, or replace the tested
-Build 11 SafeGPU implementation. This separation is deliberate: the ABI can be validated before
-the emulator is refactored around it.
+The current milestone establishes a discovery-only host in `shadps4.exe`. It shadow-copies,
+ABI-validates, initializes and unloads recognized modules before Vulkan startup. It does **not**
+call their configuration, policy or event callbacks, alter Vulkan behavior, write a crash-safe
+trace, or replace the tested Build 11 SafeGPU implementation.
 
 ## Standalone build
 
@@ -35,10 +35,9 @@ Windows APIs newer than Windows 7 in the module implementations.
 - `null_gpu` precedence belongs to the host and is also honored by the SafeGPU foundation policy.
 - Unknown SafeGPU operations fail closed.
 
-## Next integration gate
+## Current integration gate
 
-Before connecting the modules to shadPS4, materialize the exact CI-time Build 09-r2, Build 10 and
-Build 11 transformations into normal source commits and prove that the resulting binary is
-behaviorally identical to Build 11 on the target Windows 7 machine. The baseline details are in
-`BASELINE-IDENTITY.txt`.
-
+The exact CI-time Build 09-r2, Build 10 and Build 11 transformations are materialized in ordinary
+source and identified by `ci/build11-materialized.json`. Milestone B passes only when both the
+disabled path and the loaded initialization-only path remain behaviorally identical to that
+materialized control on the target Windows 7 machine.

@@ -30,6 +30,13 @@ Therefore the unmodified branch working tree is not, by itself, the final source
 11 compiler. The integration milestone must materialize those transformations into ordinary source
 commits and verify behavioral equivalence before replacing Build 11 policy with plugins.
 
+MATERIALIZATION STATUS
+
+The four transformations are now committed as normal source. Their exact order, historical
+identities, modified file set and source-diff fingerprint are recorded in
+ci/build11-materialized.json. The resulting Windows 7 binary was physically verified as unchanged
+from Build 11 before the discovery-only bridge work began.
+
 The original repository is a read-only source remote in this local project. Its push URL is disabled
 to prevent the new Graphics Lab work from altering the prior experimental branches.
 

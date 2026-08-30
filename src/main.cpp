@@ -21,6 +21,7 @@
 #include "core/ipc/ipc.h"
 #include "core/user_settings.h"
 #include "emulator.h"
+#include "graphics_lab/bridge.h"
 #include "imgui/big_picture/big_picture.h"
 
 #ifdef _WIN32
@@ -143,6 +144,10 @@ int main(int argc, char* argv[]) {
     Common::Log::Setup("shadps4.log");
 
     LOG_INFO(Debug, "Run: {}", std::span(argv, argc));
+
+    // Discovery-only milestone: load and validate shadow-copied modules before any Vulkan
+    // construction. No rendering-policy callback is connected in this build.
+    GraphicsLab::Bridge::Instance().Initialize(argv[0]);
 
     IPC::Instance().Init();
 

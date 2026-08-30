@@ -1228,6 +1228,10 @@ set(INPUT src/input/controller.cpp
 
 set(EMULATOR src/emulator.cpp
              src/emulator.h
+             src/graphics_lab/bridge.cpp
+             src/graphics_lab/bridge.h
+             graphics_lab/host/plugin_host.cpp
+             graphics_lab/host/plugin_host.h
              src/sdl_window.h
              src/sdl_window.cpp
 )
@@ -1287,7 +1291,9 @@ target_link_libraries(shadps4 PRIVATE stb::headers lfreist-hwinfo::hwinfo nlohma
 target_link_libraries(shadps4 PRIVATE Freetype::Freetype)
 target_link_libraries(shadps4 PRIVATE libprotobuf)
 target_link_libraries(shadps4 PRIVATE ZArchive::zarchive)
+target_link_libraries(shadps4 PRIVATE ${CMAKE_DL_LIBS})
 target_include_directories(shadps4 PRIVATE "${SHADNET_PROTO_OUT}")
+target_include_directories(shadps4 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/graphics_lab/include")
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
     target_link_libraries(shadps4 PRIVATE "/usr/lib/libusb.so")

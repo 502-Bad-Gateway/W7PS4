@@ -72,6 +72,30 @@ if(SHADPS4_LAB_BUILD_TESTS)
             $<TARGET_FILE:shadps4_lab_safe_gpu>
             $<TARGET_FILE:shadps4_lab_vulkan>
             $<TARGET_FILE:shadps4_lab_trace_probe>)
+
+    add_executable(shadps4_lab_host_smoke
+        tests/host_smoke.cpp
+        host/plugin_host.cpp)
+    target_include_directories(shadps4_lab_host_smoke PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/host)
+    target_link_libraries(shadps4_lab_host_smoke PRIVATE ${CMAKE_DL_LIBS})
+    shadps4_lab_target_win7(shadps4_lab_host_smoke)
+    if(MSVC)
+        target_compile_options(shadps4_lab_host_smoke PRIVATE /W4 /permissive-)
+        target_link_options(shadps4_lab_host_smoke PRIVATE /SUBSYSTEM:CONSOLE,6.01)
+    else()
+        target_compile_options(shadps4_lab_host_smoke PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    shadps4_lab_add_plugin(shadps4_lab_incompatible_fixture
+        tests/incompatible_plugin.cpp
+        shadps4_lab_incompatible_fixture)
+    add_test(NAME shadps4_lab_host_shadow_copy_smoke
+        COMMAND shadps4_lab_host_smoke
+            $<TARGET_FILE_DIR:shadps4_lab_safe_gpu>
+            $<TARGET_FILE_DIR:shadps4_lab_host_smoke>/host-shadow
+            $<TARGET_FILE:shadps4_lab_incompatible_fixture>)
 endif()
 
 install(TARGETS

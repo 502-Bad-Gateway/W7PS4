@@ -14,7 +14,7 @@ The current foundation builds and ABI-tests these standalone Windows x64 compone
 - `shadps4_trace_probe.dll` — structured, low-overhead diagnostic event capture
 - `shadps4_trace_collector.exe` — out-of-process trace collection shell
 
-Runtime loading from `shadPS4.exe` is intentionally **not active yet**. This milestone establishes the versioned plugin boundary, profiles, safety model, independent build, and smoke-test path before emulator integration.
+The current bridge can discover, shadow-copy, ABI-validate, initialize and unload the modules before Vulkan startup. Rendering-policy and event callbacks remain deliberately disconnected, so loaded modules are no-override controls in this milestone.
 
 > [!IMPORTANT]
 > This is an experimental research fork, not an official upstream shadPS4 support release.

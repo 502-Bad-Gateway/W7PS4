@@ -45,6 +45,7 @@
 #include "core/memory.h"
 #include "core/user_settings.h"
 #include "emulator.h"
+#include "graphics_lab/bridge.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderdoc.h"
 #include "video_core/safe_gpu/safe_gpu.h"
@@ -91,6 +92,7 @@ void Emulator::Shutdown() {
     if (exit_done) {
         return;
     }
+    GraphicsLab::Bridge::Instance().Shutdown();
     Common::Log::Flush();
     if (controllers) {
         controllers->ResetLightbarColors();
