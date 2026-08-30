@@ -1,0 +1,185 @@
+name: Build W7PS4 shadPS4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - CMakeLists.txt
+      - src/**
+      - tools/win7-launcher/**
+      - ci/build11-materialized.json
+      - .github/workflows/shadps4-win7.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shadps4-win7-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPERIMENT_ITERATION: "00"
+  EXPERIMENT_NAME: "build11-materialized"
+
+jobs:
+  build-win7-x64:
+    name: Build materialized Build 11 for Windows 7 x64
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Verify materialized Build 11 identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'ci/build11-materialized.json'
+          if (!(Test-Path $path)) { throw 'Build 11 materialization manifest is missing.' }
+          $manifest = Get-Content $path -Raw | ConvertFrom-Json
+          if ($manifest.format_version -ne 1) { throw 'Unsupported materialization manifest.' }
+          if ($manifest.historical_source_head -ne '81b53122760c949aee1b0529c9632585d021e38d') {
+            throw 'Unexpected historical Build 11 source identity.'
+          }
+          if ($manifest.build11_transform_parent -ne '340968cb794f200ab8c93cf0b1d2c7756f013470') {
+            throw 'Unexpected Build 11 transform parent.'
+          }
+
+          $rasterizer = [IO.File]::ReadAllText(
+            'src/video_core/renderer_vulkan/vk_rasterizer.cpp'
+          )
+          $directCount = [regex]::Matches(
+            $rasterizer,
+            'PersistLastSubmittedGraphicsPipeline\(pipeline, "direct", is_indexed\);'
+          ).Count
+          $indirectCount = [regex]::Matches(
+            $rasterizer,
+            'PersistLastSubmittedGraphicsPipeline\(pipeline, "indirect", is_indexed\);'
+          ).Count
+          if ($directCount -ne 1 -or $indirectCount -ne 1) {
+            throw "Materialized draw-site identity failed: direct=$directCount indirect=$indirectCount"
+          }
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Checked-out source failed git diff --check.' }
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Fetch llvm-mingw launcher tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '20260616'
+          $archiveName = "llvm-mingw-$version-msvcrt-x86_64.zip"
+          $archive = Join-Path $env:RUNNER_TEMP $archiveName
+          $parent = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
+          Invoke-WebRequest `
+            -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$version/$archiveName" `
+            -OutFile $archive
+          New-Item -ItemType Directory -Force -Path $parent | Out-Null
+          Expand-Archive -Path $archive -DestinationPath $parent
+          $root = Join-Path $parent "llvm-mingw-$version-msvcrt-x86_64"
+          "LLVM_MINGW_ROOT=$root" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Setup Visual Studio build environment
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+
+      - name: Prepare launcher dependency
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $jsonDir = Join-Path $env:GITHUB_WORKSPACE 'tools/win7-launcher/third_party/nlohmann'
+          New-Item -ItemType Directory -Force -Path $jsonDir | Out-Null
+          Invoke-WebRequest `
+            -Uri 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' `
+            -OutFile (Join-Path $jsonDir 'json.hpp')
+
+      - name: Configure Windows 7 Vulkan 1.2 build
+        shell: pwsh
+        run: |
+          $env:SOURCE_DATE_EPOCH = '0'
+          $env:TZ = 'UTC'
+          cmake -S . -B build-win7-shadps4 -G Ninja `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_WINDOWS_7_COMPAT=ON `
+            -DENABLE_WINDOWS_7_COMPAT_ONLY=ON `
+            -DENABLE_DISCORD_RPC=OFF `
+            -DENABLE_UPDATER=OFF `
+            -DENABLE_TESTS=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed.' }
+
+      - name: Build emulator
+        shell: pwsh
+        run: |
+          cmake --build build-win7-shadps4 --target shadps4 `
+            --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'shadPS4 build failed.' }
+
+      - name: Build Windows 7 launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:LLVM_MINGW_ROOT 'bin'
+          $cxx = Join-Path $bin 'x86_64-w64-mingw32-clang++.exe'
+          $rc = Join-Path $bin 'x86_64-w64-mingw32-windres.exe'
+          if (!(Test-Path $rc)) { $rc = Join-Path $bin 'llvm-windres.exe' }
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'tools/win7-launcher'
+          $res = Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.res'
+          $exe = Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.exe'
+          Push-Location $launcher
+          try {
+            & $rc -I . launcher.rc -O coff -o $res
+            if ($LASTEXITCODE -ne 0) { throw 'Launcher resource compilation failed.' }
+            & $cxx '-std=c++17' '-O2' '-DNDEBUG' '-DUNICODE' '-D_UNICODE' `
+              '-D_WIN32_WINNT=0x0601' '-DWINVER=0x0601' '-I' '.' 'main.cpp' $res `
+              '-o' $exe '-mwindows' '-municode' '-static' '-fuse-ld=lld' `
+              '-Wl,--subsystem,windows:6.01' '-Wl,--disable-high-entropy-va' `
+              '-lcomctl32' '-lcomdlg32' '-lshell32' '-lgdi32' '-lole32' '-luuid'
+            if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed.' }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Package shadPS4 artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'shadps4-artifact'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          Copy-Item 'build-win7-shadps4/shadps4.exe' $output
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.exe') $output
+          Copy-Item 'LICENSE' (Join-Path $output 'LICENSE-shadPS4')
+          Copy-Item 'tools/win7-launcher/LICENSE-GPL-2.0-or-later.txt' `
+            (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
+          Copy-Item 'ci/build11-materialized.json' $output
+
+          $manifest = Get-Content 'ci/build11-materialized.json' -Raw | ConvertFrom-Json
+          $buildDate = (Get-Date).ToUniversalTime().ToString('o')
+          @"
+          Repository: $env:GITHUB_REPOSITORY
+          Branch: $env:GITHUB_REF_NAME
+          Iteration: $env:EXPERIMENT_ITERATION
+          Experiment: $env:EXPERIMENT_NAME
+          Artifact: W7PS4-shadps4-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
+          Commit: $env:GITHUB_SHA
+          Build Date: $buildDate
+          Target: Windows 7 SP1 x64
+          Historical source head: $($manifest.historical_source_head)
+          Build 11 transform parent: $($manifest.build11_transform_parent)
+          Materialized source diff: $($manifest.source_diff_git_blob)
+          Runtime plugin integration: not active
+          "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
+
+      - name: Upload shadPS4 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: W7PS4-shadps4-${{ env.EXPERIMENT_ITERATION }}-${{ env.EXPERIMENT_NAME }}
+          path: shadps4-artifact
