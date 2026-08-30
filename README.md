@@ -3,6 +3,28 @@ SPDX-FileCopyrightText: 2026 shadPS4 Emulator Project
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
+# W7PS4 Graphics Lab
+
+W7PS4 is an experimental shadPS4 graphics-testing workspace derived from the verified Build 11 source line. Its purpose is to move high-frequency GPU experiments out of the main emulator executable and into small, independently rebuildable modules.
+
+The current foundation builds and ABI-tests these standalone Windows x64 components:
+
+- `shadps4_safe_gpu.dll` — conservative graphics controls and scoped fallback policies
+- `shadps4_vulkan_lab.dll` — typed per-game Vulkan overrides and configuration profiles
+- `shadps4_trace_probe.dll` — structured, low-overhead diagnostic event capture
+- `shadps4_trace_collector.exe` — out-of-process trace collection shell
+
+Runtime loading from `shadPS4.exe` is intentionally **not active yet**. This milestone establishes the versioned plugin boundary, profiles, safety model, independent build, and smoke-test path before emulator integration.
+
+Start with [the continuation guide](docs/START_HERE_shadPS4_Graphics_Lab.md), then read [the architecture note](docs/shadPS4_Graphics_Lab_Architecture.txt). Exact source provenance is recorded in [BASELINE-IDENTITY.txt](BASELINE-IDENTITY.txt), and the GitHub publication model is documented in [GITHUB-PUBLICATION-NOTE.md](GITHUB-PUBLICATION-NOTE.md).
+
+> [!IMPORTANT]
+> This is an experimental research fork, not an official upstream shadPS4 support release.
+
+---
+
+## Preserved upstream shadPS4 README
+
 <h1 align="center">
   <br>
   <a href="https://shadps4.net/"><img src="https://github.com/shadps4-emu/shadPS4/blob/main/.github/shadps4.png" width="220"></a>
