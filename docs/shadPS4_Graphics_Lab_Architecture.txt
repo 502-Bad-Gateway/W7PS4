@@ -1,0 +1,301 @@
+shadPS4 Graphics Lab — Architecture and Design Direction
+Date: 2026-08-30
+
+Yes—this is the right architectural direction. It would turn the project from a succession of custom shadPS4 builds into a reusable graphics investigation platform.
+
+The important adjustment is this: I would not make three DLLs that independently hook arbitrary shadPS4 internals. I would add one small, stable “Graphics Lab Bridge” to the Build 11 codebase, then load three clearly separated modules through it.
+
+RECOMMENDED ARCHITECTURE
+
+Component: safe_gpu.dll
+Responsibility: Decides whether GPU operations are allowed, skipped, substituted, recorded only, or executed.
+
+Component: vulkan_lab.dll
+Responsibility: Applies per-game Vulkan capabilities, fallbacks, pipeline, shader, synchronization and render-state policies.
+
+Component: trace_probe.dll
+Responsibility: Observes shadPS4 decisions and Vulkan calls and sends structured events to the diagnostic collector.
+
+Component: trace_collector.exe
+Responsibility: Survives emulator crashes, writes reports, detects hangs, builds comparisons and preserves the final events.
+
+Component: Graphics Lab Bridge
+Responsibility: Small permanent interface inside shadps4.exe that exposes safe, versioned hooks to the modules.
+
+The execution order must be fixed:
+
+1. shadPS4 describes what it intends to do.
+2. Diagnostics records the original request.
+3. Vulkan Lab applies overrides and selects fallbacks.
+4. SafeGPU permits, blocks, or substitutes the resulting operation.
+5. The Vulkan dispatch wrapper calls the driver.
+6. Diagnostics records the result, duration and affected objects.
+
+This avoids SafeGPU and Vulkan Lab silently overriding each other.
+
+THE BIGGEST IMPROVEMENT: MOST EXPERIMENTS SHOULD REQUIRE NO COMPILATION
+
+Rebuilding a small DLL is already much better than rebuilding shadPS4, but configuration experiments should normally require no build at all.
+
+The DLLs should consume external profiles containing rules such as:
+
+- Disable VK_KHR_push_descriptor.
+- Hide or expose a feature to shadPS4.
+- Select native, emulated or alternate implementation.
+- Disable the pipeline cache.
+- Change pipeline creation flags.
+- Skip one specific pipeline hash.
+- Use a shader workaround only for one shader hash.
+- Override stencil state for one title or pipeline.
+- Stop before queue submission.
+- Record command buffers without submitting them.
+
+A DLL rebuild would then only be needed when adding an entirely new fallback algorithm or a new kind of hook.
+
+Change: Change logging filters
+Required action: Immediate reload
+
+Change: Change an existing experiment setting
+Required action: Edit/select profile, then restart the game if required
+
+Change: Change a shader/pipeline rule
+Required action: Profile change, usually restart
+
+Change: Add new fallback logic
+Required action: Rebuild one DLL
+
+Change: Expose new shadPS4 internal information
+Required action: Rebuild shadps4.exe
+
+Change: Fundamentally restructure the renderer
+Required action: Full rebuild
+
+That is the realistic boundary. A plugin cannot manipulate internal behavior that the main executable never exposed.
+
+SAFEGPU SHOULD BECOME A PROGRESSIVE GPU LABORATORY
+
+SafeGPU should retain the verified rules from the previous work:
+
+- null_gpu takes precedence over safe_gpu.
+- Unknown rendering work is rejected by default.
+- Compute remains blocked unless explicitly tested.
+- Pipeline-cache warm-up remains disabled by default.
+- Every ALLOW, SKIP, SUBSTITUTE or CAPTURE_ONLY decision is counted and traceable.
+- Full GPU remains the unmodified control path.
+
+But instead of a single SafeGPU state, it should offer progressive boundaries:
+
+- Device initialization only
+- Swapchain only
+- Resource creation
+- Shader translation/compilation
+- Descriptor creation
+- Pipeline creation
+- Command recording without submission
+- Queue submission without presentation
+- Presentation
+- Full rendering with selected categories blocked
+
+This would help locate the first dangerous boundary much faster. For example, if Wipeout survives pipeline creation but crashes immediately after the first queue submission, the search space becomes dramatically smaller.
+
+SafeGPU also needs proper logical resource tracking. It should not merely pretend that a failed Vulkan object was created and pass an invalid handle downstream. Skipped objects should be represented by safe shadPS4-side wrappers, with dependent operations automatically blocked or substituted.
+
+A particularly powerful feature would be rules based on stable hashes:
+
+- Pipeline hash
+- Shader hash
+- Descriptor-layout hash
+- Render-pass hash
+- Command-buffer or submission ID
+
+You could then test “everything except pipeline P-81E92A” without rebuilding anything.
+
+THE DIAGNOSTIC TOOL SHOULD BE MORE THAN A LOG FILE
+
+An extremely verbose text log would become enormous, slow the emulator and potentially change crash timing. I would use a structured binary flight recorder with several detail levels.
+
+Each diagnostic event should include:
+
+- Global sequence number and precise monotonic timestamp
+- Process and thread ID
+- Frame, command-buffer and queue-submission IDs
+- PS4 GPU packet or draw ID
+- Shader, pipeline and render-state hashes
+- Vulkan object IDs and lifetime information
+- Operation parameters or a serialized snapshot
+- Beginning and end of every important driver call
+- Vulkan result and duration
+- Which profile rule changed the operation
+- SafeGPU’s final decision
+- Call stack for selected events
+
+The crucial feature is correlation through every layer:
+
+PS4 GPU command → shadPS4 translation → shader → pipeline → command buffer → Vulkan call → queue submission → driver result
+
+That is much more valuable than merely recording Vulkan function names.
+
+For crash detection, the probe should write a BEGIN breadcrumb before entering calls such as vkCreateGraphicsPipelines and an END event afterward. An unmatched BEGIN would identify the call active when a CPU-side driver crash occurred.
+
+GPU work is asynchronous, however, so the last call is not always the cause. The diagnostic system should also track:
+
+- Submission serial numbers
+- Which command buffers and resources belonged to each submission
+- Fence completion
+- The last completed submission
+- Pending submissions when a crash or TDR occurred
+- Resource destruction while work was still pending
+
+The collector should be a separate process using a shared-memory circular buffer. If shadPS4 or nvoglv64.dll crashes, the collector remains alive and can preserve the final events, exception module/address, DLL versions and current operation.
+
+Useful diagnostic levels would be:
+
+1. Flight recorder: low overhead, always active
+2. Object and pipeline lifecycle
+3. Vulkan calls and synchronization
+4. Draw/dispatch/resource-level tracing
+5. Full shader, pipeline and command-buffer capture
+
+ADD A “FIRST DIVERGENCE” COMPARATOR
+
+Every session should receive an experiment ID and settings hash. The collector could compare:
+
+- We Are Doomed working in Full GPU
+- A failing game in Full GPU
+- The same failing game in SafeGPU
+- The same game with one Vulkan override
+
+It should report the first meaningful divergence, not just produce two huge logs.
+
+For example:
+
+- First different requested feature
+- First different pipeline flag
+- First shader capability used only by the failing title
+- First incomplete submission
+- First object accessed after failed creation
+- First driver call that never returned
+
+This would make We Are Doomed especially valuable as the known working control on the same Windows 7/GTX 1080 Ti/472.12 system.
+
+DEEP VULKAN CONFIGURATION NEEDS MORE THAN ON/OFF SWITCHES
+
+A huge raw list of checkboxes would be dangerous and difficult to interpret. An extension or feature should have states closer to:
+
+- Auto
+- Force Off
+- Native If Supported
+- Use Fallback
+- Mask From shadPS4
+- Unsafe Spoof for tightly controlled experiments
+
+The system must distinguish between:
+
+1. What the physical driver reports
+2. What shadPS4 is allowed to see
+3. What is requested at instance/device creation
+4. Which feature structure and bits are enabled
+5. Which implementation path shadPS4 actually uses
+6. Whether the necessary function pointers resolved successfully
+
+A checkbox cannot manufacture an unsupported Vulkan feature. For the Win7 NVIDIA 472.12 problem, “Force On” must never blindly call an unavailable function. The useful options are masking, alternate code paths and actual fallback implementations.
+
+The configurable areas could eventually include:
+
+- Instance/device extensions and feature bits
+- Vulkan API-version policy
+- Queue selection and submission strategy
+- Push descriptors versus descriptor-set fallback
+- Dynamic rendering versus render-pass fallback
+- Synchronization and barrier behavior
+- Pipeline caching, optimization and creation mode
+- Shader transformations, subgroup behavior and SPIR-V passes
+- Depth, stencil, blend, viewport and rasterization state
+- Image formats, layouts and tiling
+- Memory-type selection and mapping
+- Swapchain format, present mode and image count
+- Driver-specific workarounds
+
+Each setting should declare whether it applies immediately, on the next pipeline, on device recreation, or only on the next game launch.
+
+LAUNCHER DESIGN
+
+The launcher should not be rebuilt whenever a new setting is added. Each plugin should provide a settings schema describing:
+
+- Setting ID and name
+- Type and possible values
+- Default
+- Dependencies
+- Supported hardware/API requirements
+- Restart scope
+- Risk level
+- Short explanation
+
+The launcher could generate its interface from that schema.
+
+I would include:
+
+- Searchable expert settings tree
+- “Show only relevant settings”
+- Physical support, effective value and override source
+- Baseline-versus-experiment difference view
+- Dependency warnings
+- One-axis mode that prevents changing multiple unrelated variables
+- Next/previous experiment buttons
+- Crash, hang, visual corruption and in-game result buttons
+- Automatic result-package collection
+- Separate pipeline cache per experiment ID
+
+The last point matters: pipeline or shader caches from an earlier test must not contaminate a later experiment.
+
+Profiles should be layered:
+
+1. Global defaults
+2. Windows 7/NVIDIA 472.12 platform profile
+3. Game profile, such as CUSA05670
+4. Game-version or executable-hash profile
+5. Temporary experiment profile
+6. Command-line override
+
+The report must record the final effective configuration, rather than only the files from which it was assembled.
+
+ONE ESPECIALLY VALUABLE FUTURE FEATURE: MICRO-REPRODUCERS
+
+When diagnostics identifies a suspicious shader or pipeline, it should be able to export a small reproduction package containing:
+
+- SPIR-V modules
+- Pipeline layout
+- Render-pass or dynamic-rendering state
+- Specialization constants
+- Graphics pipeline create structures
+- Relevant feature/extension requirements
+
+A small vk_replay.exe could attempt only that pipeline creation on the Windows 7 system. If it reproduces the NVIDIA driver crash, you could test twenty workarounds without launching Bloodborne or Wipeout each time.
+
+This could eventually become the fastest and most valuable part of the project.
+
+PRACTICAL LIMITATIONS
+
+A few boundaries should be accepted from the beginning:
+
+- Vulkan instance/device settings generally cannot be switched safely while a game is running.
+- Windows locks loaded DLLs. The launcher should load a versioned or shadow-copied plugin so a new build can be prepared while the current test runs.
+- An in-process plugin can still crash shadPS4; the external diagnostic collector provides evidence, not true process isolation.
+- The system can record everything visible inside shadPS4 and at the Vulkan API boundary, but it cannot reveal every internal NVIDIA driver or GPU instruction.
+- The initial bridge/refactor will require several full builds. The speed benefit arrives after that foundation is stable.
+- Exposing raw shadPS4 C++ objects through the plugin interface would make it extremely fragile. The interface should be a small, versioned C ABI using opaque IDs and normalized data.
+
+BEST IMPLEMENTATION ORDER
+
+I would approach the new repository in this order:
+
+1. Preserve the exact Build 11 source as an immutable baseline and verify unchanged behavior.
+2. Add the versioned Graphics Lab Bridge and plugin loader.
+3. Build diagnostics first, because every later module needs trustworthy observation.
+4. Add the Vulkan policy/profile engine and schema-driven launcher.
+5. Move SafeGPU behind the new operation-gating interface while preserving its existing behavior.
+6. Add per-hash pipeline/shader experiments.
+7. Add log comparison, automated experiment bisection and micro-reproducer export.
+
+So overall: your three-part idea is excellent, but the real breakthrough is not merely splitting code into smaller DLLs. It is designing shadPS4 around stable decision points, data-driven profiles, structured traces and reproducible experiment identities. Done correctly, many tests would go from “modify source, rebuild the emulator, download a large artifact” to “select one profile, restart the game, compare the resulting trace.”
+

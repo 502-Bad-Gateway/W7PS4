@@ -1,0 +1,23 @@
+{
+  "profile_version": 1,
+  "profile_id": "platform.win7.nvidia.gtx1080ti.47212",
+  "status": "design_seed_not_runtime_active",
+  "match": {
+    "os": "Windows 7 SP1 x64",
+    "gpu_vendor": "NVIDIA",
+    "gpu_model": "GeForce GTX 1080 Ti",
+    "driver": "472.12",
+    "observed_vulkan_instance_api": "1.2"
+  },
+  "settings": {
+    "safe_gpu.unknown_operation": "skip",
+    "vulkan.extension.VK_KHR_push_descriptor.path": "force_off",
+    "vulkan.pipeline_cache.mode": "isolated_per_experiment",
+    "trace.level": "flight_recorder"
+  },
+  "constraints": [
+    "Do not depend on a newer or modified NVIDIA driver",
+    "Do not claim that an override creates an unsupported Vulkan capability"
+  ]
+}
+

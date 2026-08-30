@@ -1,0 +1,11 @@
+{
+  "profile_version": 1,
+  "title_id": "CUSA07010",
+  "title": "Sonic Mania Plus",
+  "source": "Build 11 profile selection",
+  "status": "imported_policy_data_not_runtime_active",
+  "safe_gpu": {
+    "policy": "generic_fail_closed"
+  }
+}
+

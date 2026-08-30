@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "status": "foundation",
+  "settings": [
+    {
+      "id": "safe_gpu.max_stage",
+      "category": "SafeGPU/Execution boundary",
+      "type": "enum",
+      "default": "device",
+      "values": [
+        "bootstrap",
+        "instance",
+        "device",
+        "swapchain",
+        "resource",
+        "shader",
+        "descriptor",
+        "pipeline",
+        "command_recording",
+        "queue_submission",
+        "presentation"
+      ],
+      "scope": "next_game_launch",
+      "risk": "experimental",
+      "implemented_in_foundation": true
+    },
+    {
+      "id": "safe_gpu.unknown_operation",
+      "category": "SafeGPU/Safety",
+      "type": "enum",
+      "default": "skip",
+      "values": ["skip"],
+      "scope": "fixed",
+      "risk": "safe",
+      "implemented_in_foundation": true
+    },
+    {
+      "id": "vulkan.extension.VK_KHR_push_descriptor.path",
+      "category": "Vulkan/Descriptors",
+      "type": "enum",
+      "default": "auto",
+      "values": ["auto", "force_off", "native_if_supported", "fallback"],
+      "scope": "device_restart",
+      "risk": "high",
+      "implemented_in_foundation": false
+    },
+    {
+      "id": "vulkan.pipeline_cache.mode",
+      "category": "Vulkan/Pipelines",
+      "type": "enum",
+      "default": "auto",
+      "values": ["auto", "disabled", "isolated_per_experiment"],
+      "scope": "next_game_launch",
+      "risk": "medium",
+      "implemented_in_foundation": false
+    },
+    {
+      "id": "trace.level",
+      "category": "Diagnostics/Capture",
+      "type": "enum",
+      "default": "flight_recorder",
+      "values": [
+        "flight_recorder",
+        "object_lifecycle",
+        "vulkan_calls",
+        "draw_resource",
+        "full_capture"
+      ],
+      "scope": "immediate",
+      "risk": "performance",
+      "implemented_in_foundation": false
+    }
+  ]
+}
+

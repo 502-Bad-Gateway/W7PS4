@@ -1,0 +1,12 @@
+{
+  "profile_version": 1,
+  "title_id": "CUSA05670",
+  "title": "Wipeout Omega Collection",
+  "source": "Build 11 ci/apply-build11.ps1",
+  "status": "imported_policy_data_not_runtime_active",
+  "safe_gpu": {
+    "quarantined_pipeline_hashes": ["0x2dc86d47c8a5b854"],
+    "quarantine_boundary": "before_vkCreateGraphicsPipelines"
+  }
+}
+

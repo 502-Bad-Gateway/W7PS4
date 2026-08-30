@@ -1,0 +1,15 @@
+{
+  "profile_version": 1,
+  "title_id": "CUSA02394",
+  "title": "We Are Doomed",
+  "source": "Build 11 inherited control island",
+  "status": "imported_policy_data_not_runtime_active",
+  "safe_gpu": {
+    "known_native_control_pipeline_hashes": [
+      "0x8202f0d30159f803",
+      "0x762f3099a689a76f",
+      "0x10dc0563ad6f6258"
+    ]
+  }
+}
+
