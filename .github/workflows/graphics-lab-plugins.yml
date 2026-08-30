@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: graphics-lab-plugins-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-win7-x64:
     name: Build Windows 7 x64 plugin foundation
