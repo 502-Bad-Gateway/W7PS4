@@ -4,6 +4,8 @@
 #pragma once
 
 #include <span>
+#include <string_view>
+#include <vector>
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -17,7 +19,8 @@ namespace Vulkan {
  * @param device The vulkan device handle.
  */
 vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, vk::Device device,
-                         std::vector<std::string> defines = {});
+                         std::vector<std::string> defines = {},
+                         std::vector<u32>* compiled_spirv = nullptr);
 
 /**
  * @brief Creates a vulkan shader module from SPIR-V bytecode.

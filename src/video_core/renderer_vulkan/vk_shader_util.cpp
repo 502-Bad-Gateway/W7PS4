@@ -160,7 +160,7 @@ bool InitializeCompiler() {
 } // Anonymous namespace
 
 vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, vk::Device device,
-                         std::vector<std::string> defines) {
+                         std::vector<std::string> defines, std::vector<u32>* compiled_spirv) {
     if (!InitializeCompiler()) {
         return {};
     }
@@ -249,6 +249,10 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
     const std::string spv_messages = logger.getAllMessages();
     if (!spv_messages.empty()) {
         LOG_INFO(Render_Vulkan, "SPIR-V conversion messages: {}", spv_messages);
+    }
+
+    if (compiled_spirv) {
+        *compiled_spirv = out_code;
     }
 
     return CompileSPV(out_code, device);

@@ -103,11 +103,21 @@ bool WriteDoneFile(const std::filesystem::path& done,
     }
     output << "format=1\n"
            << "producer_pid=" << summary.producer_pid << '\n'
+           << "producer_state=" << summary.producer_state << '\n'
+           << "crashed=" << (summary.crashed ? "true" : "false") << '\n'
            << "clean_shutdown=" << (summary.clean_shutdown ? "true" : "false") << '\n'
            << "first_sequence=" << summary.first_sequence << '\n'
            << "last_sequence=" << summary.last_sequence << '\n'
            << "decoded_events=" << summary.decoded_events << '\n'
            << "lost_events=" << summary.lost_events << '\n';
+    if (summary.crashed) {
+        output << "crash_exception_code=" << summary.crash_exception_code << '\n'
+               << "crash_access_type=" << summary.crash_access_type << '\n'
+               << "crash_thread_id=" << summary.crash_thread_id << '\n'
+               << "crash_instruction_address=" << summary.crash_instruction_address << '\n'
+               << "crash_fault_address=" << summary.crash_fault_address << '\n'
+               << "crash_module_base=" << summary.crash_module_base << '\n';
+    }
     output.flush();
     if (!output) {
         if (error) {
@@ -125,7 +135,7 @@ int CollectorMain(const std::vector<std::basic_string<Character>>& arguments) {
     const auto watch = Flag<Character>("--watch", L"--watch");
 
     if (arguments.size() == 2 && arguments[1] == version) {
-        std::cout << "shadPS4 Graphics Lab trace collector 0.2.0\n";
+        std::cout << "shadPS4 Graphics Lab trace collector 0.3.0\n";
         return 0;
     }
 
@@ -189,6 +199,7 @@ int CollectorMain(const std::vector<std::basic_string<Character>>& arguments) {
             std::cout << "Decoded " << summary.decoded_events << " event(s), sequence "
                       << summary.first_sequence << ".." << summary.last_sequence
                       << ", lost=" << summary.lost_events
+                      << ", crashed=" << (summary.crashed ? "true" : "false")
                       << ", clean_shutdown=" << (summary.clean_shutdown ? "true" : "false")
                       << '\n';
             return 0;

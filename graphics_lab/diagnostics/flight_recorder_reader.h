@@ -18,7 +18,15 @@ struct FlightRecorderDecodeSummary {
     std::uint64_t last_sequence{};
     std::uint64_t decoded_events{};
     std::uint64_t lost_events{};
+    std::uint32_t producer_state{};
+    std::uint32_t crash_exception_code{};
+    std::uint32_t crash_access_type{};
+    std::uint64_t crash_thread_id{};
+    std::uint64_t crash_instruction_address{};
+    std::uint64_t crash_fault_address{};
+    std::uint64_t crash_module_base{};
     bool clean_shutdown{};
+    bool crashed{};
 };
 
 bool ReadFlightRecorderHeader(const std::filesystem::path& input,

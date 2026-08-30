@@ -9,6 +9,8 @@
 #include "common/assert.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
+#include "core/debug_state.h"
+#include "graphics_lab/bridge.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -634,8 +636,18 @@ GraphicsPipeline::GraphicsPipeline(
     }
 #endif
 
+    const u64 diagnostic_pipeline_hash = std::hash<GraphicsPipelineKey>{}(key);
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN, SHADPS4_LAB_STAGE_PIPELINE,
+        "vkCreateGraphicsPipelines", 0, pipeline_forensics.sequence, DebugState.GetFrameNum(),
+        scheduler.CurrentTick(), diagnostic_pipeline_hash);
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_DRIVER_CALL_END, SHADPS4_LAB_STAGE_PIPELINE,
+        "vkCreateGraphicsPipelines", static_cast<std::int32_t>(pipeline_result),
+        pipeline_forensics.sequence, DebugState.GetFrameNum(), scheduler.CurrentTick(),
+        diagnostic_pipeline_hash);
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     if (!pipeline_forensics_report_path.empty()) {
         using namespace Common::FS;

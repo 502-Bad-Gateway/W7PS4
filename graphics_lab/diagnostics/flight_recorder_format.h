@@ -17,6 +17,16 @@ inline constexpr std::uint32_t MaximumFlightRecorderCapacity = 262144;
 enum class ProducerState : std::uint32_t {
     Active = 1,
     CleanShutdown = 2,
+    Crashed = 3,
+};
+
+struct FlightRecorderCrashInfo {
+    std::uint32_t exception_code{};
+    std::uint32_t access_type{};
+    std::uint64_t thread_id{};
+    std::uint64_t instruction_address{};
+    std::uint64_t fault_address{};
+    std::uint64_t module_base{};
 };
 
 enum FlightRecordFlags : std::uint32_t {
@@ -37,7 +47,13 @@ struct alignas(64) FlightRecorderHeader {
     std::uint64_t dropped_events;
     std::uint32_t producer_state;
     std::uint32_t flags;
-    std::uint64_t reserved[23];
+    std::uint32_t crash_exception_code;
+    std::uint32_t crash_access_type;
+    std::uint64_t crash_thread_id;
+    std::uint64_t crash_instruction_address;
+    std::uint64_t crash_fault_address;
+    std::uint64_t crash_module_base;
+    std::uint64_t reserved[18];
 };
 
 struct alignas(64) FlightRecord {

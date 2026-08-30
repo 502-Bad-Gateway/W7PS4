@@ -14,11 +14,12 @@ The current foundation builds and ABI-tests these standalone Windows x64 compone
 - `shadps4_trace_probe.dll` — structured, low-overhead diagnostic event capture
 - `shadps4_trace_collector.exe` — out-of-process crash/exit trace collector
 
-The current diagnostic milestone assigns one monotonic sequence to every host event, records the
-events in a file-backed shared-memory ring, and preserves both raw and decoded traces after a clean
-exit or forced termination. Initial breadcrumbs cover module lifecycle, final GPU mode, and
-`vkCreateInstance`/`vkCreateDevice` BEGIN/END boundaries. Rendering-policy callbacks remain
-disconnected, so the modules cannot change graphics behavior in this milestone.
+The current diagnostic milestone preserves truthful crash state and records ordered Vulkan
+breadcrumbs through shader translation, SPIR-V emission, shader and graphics-pipeline creation,
+draw preparation and command recording, render-pass setup, command-buffer completion, and queue
+submission. Events carry frame, submission, pipeline, command-buffer, and driver-object identities
+where available. Rendering-policy callbacks remain disconnected, so the modules cannot change
+graphics behavior in this milestone.
 
 > [!IMPORTANT]
 > This is an experimental research fork, not an official upstream shadPS4 support release.

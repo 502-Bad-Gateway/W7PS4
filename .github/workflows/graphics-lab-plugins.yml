@@ -16,12 +16,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPERIMENT_ITERATION: "02"
-  EXPERIMENT_NAME: "flight-recorder"
+  EXPERIMENT_ITERATION: "03"
+  EXPERIMENT_NAME: "vulkan-breadcrumbs"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 diagnostic flight recorder
+    name: Build Windows 7 x64 Vulkan breadcrumb tools
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -83,15 +83,16 @@ jobs:
           Copy-Item BASELINE-IDENTITY.txt $output
           @"
           Project: shadPS4 Graphics Lab
-          Milestone: crash-safe-flight-recorder
+          Milestone: vulkan-crash-breadcrumbs
           ABI: 1.0
           Source commit: $env:GITHUB_SHA
           Artifact: W7PS4-graphic_lab-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
           Target: Windows 7 SP1 x64
           Modules: shadps4_safe_gpu.dll, shadps4_vulkan_lab.dll, shadps4_trace_probe.dll
           Collector: shadps4_trace_collector.exe
-          Runtime integration: monotonic observational event bus and file-backed shared-memory ring
-          Collector behavior: automatic clean-exit and forced-termination JSONL recovery
+          Runtime integration: ordered Vulkan BEGIN/END breadcrumbs in a file-backed ring
+          Collector behavior: truthful crash metadata plus clean-exit and crash JSONL recovery
+          Generated shader mapping: SafeGPU flat-fragment SPIR-V is captured
           Rendering policy dispatch: disconnected
           "@ | Out-File -Encoding utf8 (Join-Path $output 'PLUGIN-IDENTITY.txt')
 

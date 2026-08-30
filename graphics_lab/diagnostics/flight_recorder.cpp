@@ -73,6 +73,19 @@ void AtomicStore(std::uint32_t* address, const std::uint32_t value) noexcept {
 #endif
 }
 
+bool AtomicCompareExchange(std::uint32_t* address, const std::uint32_t expected,
+                           const std::uint32_t desired) noexcept {
+#if defined(_WIN32)
+    return static_cast<std::uint32_t>(InterlockedCompareExchange(
+               reinterpret_cast<volatile LONG*>(address), static_cast<LONG>(desired),
+               static_cast<LONG>(expected))) == expected;
+#else
+    auto observed = expected;
+    return __atomic_compare_exchange_n(address, &observed, desired, false, __ATOMIC_RELEASE,
+                                       __ATOMIC_ACQUIRE);
+#endif
+}
+
 std::string PlatformErrorText() {
 #if defined(_WIN32)
     return "Windows error " + std::to_string(GetLastError());
@@ -294,20 +307,37 @@ void FlightRecorder::Record(const Shadps4LabEventV1& event) noexcept {
     impl->recorded_events.fetch_add(1, std::memory_order_relaxed);
 
     const auto pending = impl->events_since_flush.fetch_add(1, std::memory_order_relaxed) + 1;
-    const bool driver_boundary = event.type == SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN ||
-                                 event.type == SHADPS4_LAB_EVENT_DRIVER_CALL_END;
-    if (driver_boundary || pending >= 64) {
+    // File-backed mappings remain coherent for the collector without forcing a filesystem flush
+    // around every hot-path Vulkan breadcrumb. Periodic flushing bounds writeback latency while
+    // avoiding a diagnostic-only timing distortion on every draw.
+    if (event.type == SHADPS4_LAB_EVENT_CRASH || pending >= 64) {
         impl->events_since_flush.store(0, std::memory_order_relaxed);
         impl->Flush(false);
     }
+}
+
+void FlightRecorder::MarkCrashed(const FlightRecorderCrashInfo& crash) noexcept {
+    if (!impl->header) {
+        return;
+    }
+    AtomicStore(&impl->header->crash_exception_code, crash.exception_code);
+    AtomicStore(&impl->header->crash_access_type, crash.access_type);
+    AtomicStore(&impl->header->crash_thread_id, crash.thread_id);
+    AtomicStore(&impl->header->crash_instruction_address, crash.instruction_address);
+    AtomicStore(&impl->header->crash_fault_address, crash.fault_address);
+    AtomicStore(&impl->header->crash_module_base, crash.module_base);
+    AtomicStore(&impl->header->producer_state,
+                static_cast<std::uint32_t>(ProducerState::Crashed));
+    impl->Flush(true);
 }
 
 void FlightRecorder::MarkCleanShutdown() noexcept {
     if (!impl->header) {
         return;
     }
-    AtomicStore(&impl->header->producer_state,
-                static_cast<std::uint32_t>(ProducerState::CleanShutdown));
+    AtomicCompareExchange(&impl->header->producer_state,
+                          static_cast<std::uint32_t>(ProducerState::Active),
+                          static_cast<std::uint32_t>(ProducerState::CleanShutdown));
     impl->Flush(true);
 }
 

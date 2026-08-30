@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -38,6 +39,38 @@ const char* EventTypeName(const std::uint32_t type) noexcept {
         return "submission";
     case SHADPS4_LAB_EVENT_DIAGNOSTIC:
         return "diagnostic";
+    case SHADPS4_LAB_EVENT_STEP_BEGIN:
+        return "step_begin";
+    case SHADPS4_LAB_EVENT_STEP_END:
+        return "step_end";
+    case SHADPS4_LAB_EVENT_CRASH:
+        return "crash";
+    default:
+        return "unknown";
+    }
+}
+
+const char* ProducerStateName(const std::uint32_t state) noexcept {
+    switch (static_cast<ProducerState>(state)) {
+    case ProducerState::Active:
+        return "active";
+    case ProducerState::CleanShutdown:
+        return "clean_shutdown";
+    case ProducerState::Crashed:
+        return "crashed";
+    default:
+        return "unknown";
+    }
+}
+
+const char* CrashAccessName(const std::uint32_t access) noexcept {
+    switch (access) {
+    case SHADPS4_LAB_CRASH_ACCESS_READ:
+        return "read";
+    case SHADPS4_LAB_CRASH_ACCESS_WRITE:
+        return "write";
+    case SHADPS4_LAB_CRASH_ACCESS_EXECUTE:
+        return "execute";
     default:
         return "unknown";
     }
@@ -143,6 +176,66 @@ std::string Hex(const std::uint8_t* data, const std::size_t size) {
         output[index * 2 + 1] = Digits[data[index] & 0x0fu];
     }
     return output;
+}
+
+std::string HexValue(const std::uint64_t value) {
+    std::ostringstream output;
+    output << "0x" << std::hex << value;
+    return output.str();
+}
+
+bool NameEquals(const FlightRecord& record, const std::string_view expected) noexcept {
+    return record.name_size == expected.size() &&
+           std::memcmp(record.name, expected.data(), expected.size()) == 0;
+}
+
+void WriteKnownPayload(std::ostream& output, const FlightRecord& record) {
+    if ((NameEquals(record, "vkCmdDraw") || NameEquals(record, "vkCmdDrawIndexed")) &&
+        record.payload_size >= sizeof(Shadps4LabDrawPayloadV1)) {
+        Shadps4LabDrawPayloadV1 payload{};
+        std::memcpy(&payload, record.payload, sizeof(payload));
+        if (payload.struct_size >= sizeof(payload)) {
+            output << ",\"draw\":{\"indexed\":" << (payload.indexed ? "true" : "false")
+                   << ",\"vertex_or_index_count\":" << payload.vertex_or_index_count
+                   << ",\"instance_count\":" << payload.instance_count
+                   << ",\"vertex_offset\":" << payload.vertex_offset
+                   << ",\"first_vertex_or_index\":" << payload.first_vertex_or_index
+                   << ",\"first_instance\":" << payload.first_instance
+                   << ",\"index_buffer_offset\":" << payload.index_buffer_offset << '}';
+        }
+    } else if (NameEquals(record, "vkQueueSubmit") &&
+               record.payload_size >= sizeof(Shadps4LabQueueSubmitPayloadV1)) {
+        Shadps4LabQueueSubmitPayloadV1 payload{};
+        std::memcpy(&payload, record.payload, sizeof(payload));
+        if (payload.struct_size >= sizeof(payload)) {
+            output << ",\"queue_submit\":{\"wait_semaphore_count\":"
+                   << payload.wait_semaphore_count << ",\"signal_semaphore_count\":"
+                   << payload.signal_semaphore_count << ",\"command_buffer_count\":"
+                   << payload.command_buffer_count << ",\"signal_value\":"
+                   << payload.signal_value << ",\"signal_value_hex\":\""
+                   << HexValue(payload.signal_value) << "\",\"command_buffer_id\":"
+                   << payload.command_buffer_id << ",\"command_buffer_id_hex\":\""
+                   << HexValue(payload.command_buffer_id) << "\",\"fence_id\":"
+                   << payload.fence_id << ",\"fence_id_hex\":\""
+                   << HexValue(payload.fence_id) << "\"}";
+        }
+    } else if (record.event_type == SHADPS4_LAB_EVENT_CRASH &&
+               record.payload_size >= sizeof(Shadps4LabCrashPayloadV1)) {
+        Shadps4LabCrashPayloadV1 payload{};
+        std::memcpy(&payload, record.payload, sizeof(payload));
+        if (payload.struct_size >= sizeof(payload)) {
+            output << ",\"crash\":{\"exception_code\":" << payload.exception_code
+                   << ",\"exception_code_hex\":\"" << HexValue(payload.exception_code)
+                   << "\",\"access_type\":\"" << CrashAccessName(payload.access_type)
+                   << "\",\"instruction_address\":" << payload.instruction_address
+                   << ",\"instruction_address_hex\":\""
+                   << HexValue(payload.instruction_address) << "\",\"fault_address\":"
+                   << payload.fault_address << ",\"fault_address_hex\":\""
+                   << HexValue(payload.fault_address) << "\",\"module_base\":"
+                   << payload.module_base << ",\"module_base_hex\":\""
+                   << HexValue(payload.module_base) << "\"}";
+        }
+    }
 }
 
 bool ReplaceFile(const std::filesystem::path& temporary,
@@ -278,13 +371,33 @@ bool DecodeFlightRecorder(const std::filesystem::path& input,
 
         const bool clean = header.producer_state ==
                            static_cast<std::uint32_t>(ProducerState::CleanShutdown);
+        const bool crashed =
+            header.producer_state == static_cast<std::uint32_t>(ProducerState::Crashed);
         decoded << "{\"kind\":\"session\",\"format\":" << header.format_version
                 << ",\"producer_pid\":" << header.producer_pid
                 << ",\"created_unix_ns\":" << header.created_unix_ns
+                << ",\"producer_state\":" << header.producer_state
+                << ",\"producer_state_name\":\"" << ProducerStateName(header.producer_state)
+                << "\",\"crashed\":" << (crashed ? "true" : "false")
                 << ",\"clean_shutdown\":" << (clean ? "true" : "false")
                 << ",\"capacity\":" << header.capacity << ",\"first_sequence\":" << first
                 << ",\"last_sequence\":" << last << ",\"decoded_events\":"
-                << records.size() << ",\"lost_events\":" << lost << "}\n";
+                << records.size() << ",\"lost_events\":" << lost;
+        if (crashed) {
+            decoded << ",\"crash\":{\"exception_code\":" << header.crash_exception_code
+                    << ",\"exception_code_hex\":\"" << HexValue(header.crash_exception_code)
+                    << "\",\"access_type\":\""
+                    << CrashAccessName(header.crash_access_type) << "\",\"thread_id\":"
+                    << header.crash_thread_id << ",\"instruction_address\":"
+                    << header.crash_instruction_address << ",\"instruction_address_hex\":\""
+                    << HexValue(header.crash_instruction_address)
+                    << "\",\"fault_address\":" << header.crash_fault_address
+                    << ",\"fault_address_hex\":\"" << HexValue(header.crash_fault_address)
+                    << "\",\"module_base\":" << header.crash_module_base
+                    << ",\"module_base_hex\":\"" << HexValue(header.crash_module_base)
+                    << "\"}";
+        }
+        decoded << "}\n";
         for (const auto& record : records) {
             decoded << "{\"kind\":\"event\",\"sequence\":" << record.sequence
                     << ",\"timestamp_ns\":" << record.timestamp_ns
@@ -295,12 +408,18 @@ bool DecodeFlightRecorder(const std::filesystem::path& input,
                     << ",\"result_code\":" << record.result_code
                     << ",\"frame_id\":" << record.frame_id
                     << ",\"submission_id\":" << record.submission_id
-                    << ",\"object_id\":" << record.object_id
-                    << ",\"pipeline_hash\":" << record.pipeline_hash
-                    << ",\"shader_hash\":" << record.shader_hash << ",\"flags\":"
-                    << record.flags << ",\"name\":\""
+                    << ",\"submission_id_hex\":\"" << HexValue(record.submission_id)
+                    << "\",\"object_id\":" << record.object_id
+                    << ",\"object_id_hex\":\"" << HexValue(record.object_id)
+                    << "\",\"pipeline_hash\":" << record.pipeline_hash
+                    << ",\"pipeline_hash_hex\":\"" << HexValue(record.pipeline_hash)
+                    << "\",\"shader_hash\":" << record.shader_hash
+                    << ",\"shader_hash_hex\":\"" << HexValue(record.shader_hash)
+                    << "\",\"flags\":" << record.flags << ",\"name\":\""
                     << JsonEscape(record.name, record.name_size) << "\",\"payload_hex\":\""
-                    << Hex(record.payload, record.payload_size) << "\"}\n";
+                    << Hex(record.payload, record.payload_size) << "\"";
+            WriteKnownPayload(decoded, record);
+            decoded << "}\n";
         }
         decoded.flush();
         if (!decoded) {
@@ -324,7 +443,15 @@ bool DecodeFlightRecorder(const std::filesystem::path& input,
             summary->last_sequence = last;
             summary->decoded_events = records.size();
             summary->lost_events = lost;
+            summary->producer_state = header.producer_state;
+            summary->crash_exception_code = header.crash_exception_code;
+            summary->crash_access_type = header.crash_access_type;
+            summary->crash_thread_id = header.crash_thread_id;
+            summary->crash_instruction_address = header.crash_instruction_address;
+            summary->crash_fault_address = header.crash_fault_address;
+            summary->crash_module_base = header.crash_module_base;
             summary->clean_shutdown = clean;
+            summary->crashed = crashed;
         }
         if (error) {
             error->clear();

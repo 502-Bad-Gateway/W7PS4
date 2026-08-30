@@ -102,7 +102,111 @@ int main(const int argc, const char* const argv[]) {
         return Fail("interrupted recorder was not preserved as an unclean session") ? 0 : 1;
     }
 
-    std::cout << "Validated wraparound, ordered decode, clean shutdown and interrupted-session "
-                 "recovery\n";
+    const auto crashed_raw = root / "crashed.glfr";
+    const auto crashed_jsonl = root / "crashed.jsonl";
+    if (!recorder.Open(crashed_raw, 256, 4444, 192837465, &error)) {
+        return Fail("could not open crashed recorder: " + error) ? 0 : 1;
+    }
+    Shadps4LabCrashPayloadV1 crash_payload{};
+    crash_payload.struct_size = sizeof(Shadps4LabCrashPayloadV1);
+    crash_payload.exception_code = 0xc0000005u;
+    crash_payload.access_type = SHADPS4_LAB_CRASH_ACCESS_READ;
+    crash_payload.instruction_address = 0x7fecf20a298ull;
+    crash_payload.fault_address = 0xffffffffffffffffull;
+    crash_payload.module_base = 0x7fece100000ull;
+    const std::string crash_name = "process.unhandled_exception";
+    Shadps4LabEventV1 crash_event{};
+    crash_event.struct_size = sizeof(crash_event);
+    crash_event.type = SHADPS4_LAB_EVENT_CRASH;
+    crash_event.sequence = 3;
+    crash_event.timestamp_ns = 1234;
+    crash_event.thread_id = 10644;
+    crash_event.stage = SHADPS4_LAB_STAGE_UNKNOWN;
+    crash_event.result_code = static_cast<std::int32_t>(crash_payload.exception_code);
+    crash_event.name = {crash_name.data(), static_cast<std::uint32_t>(crash_name.size())};
+    crash_event.payload = &crash_payload;
+    crash_event.payload_size = sizeof(crash_payload);
+
+    Shadps4LabDrawPayloadV1 draw_payload{};
+    draw_payload.struct_size = sizeof(draw_payload);
+    draw_payload.indexed = 1;
+    draw_payload.vertex_or_index_count = 6;
+    draw_payload.instance_count = 2;
+    draw_payload.vertex_offset = -4;
+    draw_payload.first_instance = 9;
+    draw_payload.index_buffer_offset = 128;
+    const std::string draw_name = "vkCmdDrawIndexed";
+    auto draw_event = MakeEvent(1, draw_name);
+    draw_event.type = SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN;
+    draw_event.stage = SHADPS4_LAB_STAGE_COMMAND_RECORDING;
+    draw_event.frame_id = 11;
+    draw_event.submission_id = 12;
+    draw_event.pipeline_hash = 0x341c223bf661eb8cull;
+    draw_event.payload = &draw_payload;
+    draw_event.payload_size = sizeof(draw_payload);
+    recorder.Record(draw_event);
+
+    Shadps4LabQueueSubmitPayloadV1 submit_payload{};
+    submit_payload.struct_size = sizeof(submit_payload);
+    submit_payload.wait_semaphore_count = 1;
+    submit_payload.signal_semaphore_count = 1;
+    submit_payload.command_buffer_count = 1;
+    submit_payload.signal_value = 12;
+    submit_payload.command_buffer_id = 0x1111;
+    submit_payload.fence_id = 0x2222;
+    const std::string submit_name = "vkQueueSubmit";
+    auto submit_event = MakeEvent(2, submit_name);
+    submit_event.type = SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN;
+    submit_event.stage = SHADPS4_LAB_STAGE_QUEUE_SUBMISSION;
+    submit_event.submission_id = 12;
+    submit_event.payload = &submit_payload;
+    submit_event.payload_size = sizeof(submit_payload);
+    recorder.Record(submit_event);
+    recorder.Record(crash_event);
+    GraphicsLab::Diagnostics::FlightRecorderCrashInfo crash_info{};
+    crash_info.exception_code = crash_payload.exception_code;
+    crash_info.access_type = crash_payload.access_type;
+    crash_info.thread_id = crash_event.thread_id;
+    crash_info.instruction_address = crash_payload.instruction_address;
+    crash_info.fault_address = crash_payload.fault_address;
+    crash_info.module_base = crash_payload.module_base;
+    recorder.MarkCrashed(crash_info);
+    recorder.MarkCleanShutdown();
+    recorder.Close();
+    if (!GraphicsLab::Diagnostics::DecodeFlightRecorder(crashed_raw, crashed_jsonl, &summary,
+                                                         &error)) {
+        return Fail("could not decode crashed recorder: " + error) ? 0 : 1;
+    }
+    if (summary.clean_shutdown || !summary.crashed ||
+        summary.producer_state !=
+            static_cast<std::uint32_t>(GraphicsLab::Diagnostics::ProducerState::Crashed) ||
+        summary.crash_exception_code != crash_payload.exception_code ||
+        summary.crash_access_type != crash_payload.access_type ||
+        summary.crash_thread_id != crash_event.thread_id ||
+        summary.crash_instruction_address != crash_payload.instruction_address ||
+        summary.crash_fault_address != crash_payload.fault_address ||
+        summary.crash_module_base != crash_payload.module_base || summary.first_sequence != 1 ||
+        summary.last_sequence != 3 || summary.decoded_events != 3) {
+        return Fail("handled crash was not preserved as a crashed session") ? 0 : 1;
+    }
+    std::ifstream crashed_decoded(crashed_jsonl, std::ios::binary);
+    const std::string crashed_text{std::istreambuf_iterator<char>{crashed_decoded},
+                                   std::istreambuf_iterator<char>{}};
+    if (crashed_text.find("\"producer_state_name\":\"crashed\"") == std::string::npos ||
+        crashed_text.find("\"exception_code_hex\":\"0xc0000005\"") ==
+            std::string::npos ||
+        crashed_text.find("\"access_type\":\"read\"") == std::string::npos ||
+        crashed_text.find("\"draw\":{\"indexed\":true") == std::string::npos ||
+        crashed_text.find("\"queue_submit\":{\"wait_semaphore_count\":1") ==
+            std::string::npos ||
+        crashed_text.find("\"command_buffer_id_hex\":\"0x1111\"") ==
+            std::string::npos ||
+        crashed_text.find("\"pipeline_hash_hex\":\"0x341c223bf661eb8c\"") ==
+            std::string::npos) {
+        return Fail("crash JSONL metadata is incomplete") ? 0 : 1;
+    }
+
+    std::cout << "Validated wraparound, ordered decode, clean shutdown, interrupted recovery and "
+                 "truthful handled-crash classification\n";
     return 0;
 }

@@ -116,6 +116,9 @@ private:
     void InitializePipelineForensics();
     void RegisterPipelineForensicsShader(vk::ShaderModule module, std::span<const u32> code,
                                          const Shader::Info& info, size_t perm_idx);
+    void RegisterPipelineForensicsGeneratedShader(vk::ShaderModule module,
+                                                  std::span<const u32> code,
+                                                  std::string_view label);
     [[nodiscard]] GraphicsPipelineForensics BuildPipelineForensics(u64 pipeline_hash);
 #endif
 

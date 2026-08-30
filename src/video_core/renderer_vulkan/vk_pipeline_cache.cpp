@@ -10,6 +10,7 @@
 #include "common/path_util.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
+#include "graphics_lab/bridge.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/recompiler.h"
@@ -406,6 +407,27 @@ void PipelineCache::RegisterPipelineForensicsShader(vk::ShaderModule module,
     pipeline_forensics_shader_files[module] = PathToUTF8String(relative_path);
 }
 
+void PipelineCache::RegisterPipelineForensicsGeneratedShader(vk::ShaderModule module,
+                                                              std::span<const u32> code,
+                                                              const std::string_view label) {
+    using namespace Common::FS;
+    if (pipeline_forensics_run_directory.empty() || !module || code.empty()) {
+        return;
+    }
+
+    const u64 spv_hash = XXH3_64bits(code.data(), code.size_bytes());
+    const auto filename = fmt::format("generated_{}_spv_{:016x}.spv", label, spv_hash);
+    const auto relative_path = std::filesystem::path{"modules"} / filename;
+    const auto full_path = pipeline_forensics_run_directory / relative_path;
+    const IOFile file{full_path, FileAccessMode::Create};
+    if (file.WriteSpan(code) != code.size()) {
+        LOG_ERROR(Render_Vulkan, "Win7 pipeline forensics failed to write generated shader {}",
+                  PathToUTF8String(full_path));
+        return;
+    }
+    pipeline_forensics_shader_files[module] = PathToUTF8String(relative_path);
+}
+
 GraphicsPipelineForensics PipelineCache::BuildPipelineForensics(const u64 pipeline_hash) {
     GraphicsPipelineForensics forensics{};
     if (pipeline_forensics_run_directory.empty()) {
@@ -518,9 +540,27 @@ void main() {
     out_color = vec4(0.72, 0.78, 0.86, 1.0);
 }
 )glsl";
+            const u64 flat_fragment_hash =
+                XXH3_64bits(FlatFragmentSource.data(), FlatFragmentSource.size());
+            std::vector<u32> flat_fragment_spirv;
+            GraphicsLab::Bridge::Instance().EmitEvent(
+                SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_SHADER,
+                "safe_gpu.compile_flat_fragment", 0, 0, DebugState.GetFrameNum(),
+                scheduler.CurrentTick(), pipeline_hash, flat_fragment_hash);
             safe_gpu_flat_fragment_module =
                 Compile(FlatFragmentSource, vk::ShaderStageFlagBits::eFragment,
-                        instance.GetDevice());
+                        instance.GetDevice(), {}, &flat_fragment_spirv);
+            GraphicsLab::Bridge::Instance().EmitEvent(
+                SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_SHADER,
+                "safe_gpu.compile_flat_fragment",
+                safe_gpu_flat_fragment_module ? 0 : SHADPS4_LAB_STATUS_INTERNAL_ERROR, 0,
+                DebugState.GetFrameNum(), scheduler.CurrentTick(), pipeline_hash,
+                flat_fragment_hash);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+            RegisterPipelineForensicsGeneratedShader(safe_gpu_flat_fragment_module,
+                                                      flat_fragment_spirv,
+                                                      "safe_gpu_flat_fragment");
+#endif
         }
         modules[static_cast<u32>(LogicalStage::Fragment)] =
             safe_gpu_flat_fragment_module;
@@ -822,8 +862,23 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
              perm_idx != 0 ? "(permutation)" : "");
     DumpShader(code, info.pgm_hash, info.stage, perm_idx, "bin");
 
+    const u64 diagnostic_frame_id = DebugState.GetFrameNum();
+    const u64 diagnostic_submission_id = scheduler.CurrentTick();
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_SHADER, "shader.translate", 0, perm_idx,
+        diagnostic_frame_id, diagnostic_submission_id, 0, info.pgm_hash);
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_SHADER, "shader.translate", 0, perm_idx,
+        diagnostic_frame_id, diagnostic_submission_id, 0, info.pgm_hash);
+
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_SHADER, "shader.emit_spirv", 0, perm_idx,
+        diagnostic_frame_id, diagnostic_submission_id, 0, info.pgm_hash);
     auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime_info, ir_program, binding);
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_SHADER, "shader.emit_spirv", 0, perm_idx,
+        diagnostic_frame_id, diagnostic_submission_id, 0, info.pgm_hash);
     DumpShader(spv, info.pgm_hash, info.stage, perm_idx, "spv");
 
     vk::ShaderModule module;
@@ -835,10 +890,16 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
                    : std::span<const u32>{spv.data(), spv.size()};
     if (is_patched) {
         LOG_INFO(Loader, "Loaded patch for {} shader {:#x}", info.stage, info.pgm_hash);
-        module = CompileSPV(final_spv, instance.GetDevice());
-    } else {
-        module = CompileSPV(final_spv, instance.GetDevice());
     }
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN, SHADPS4_LAB_STAGE_SHADER,
+        "vkCreateShaderModule", 0, perm_idx, diagnostic_frame_id, diagnostic_submission_id, 0,
+        info.pgm_hash);
+    module = CompileSPV(final_spv, instance.GetDevice());
+    GraphicsLab::Bridge::Instance().EmitEvent(
+        SHADPS4_LAB_EVENT_DRIVER_CALL_END, SHADPS4_LAB_STAGE_SHADER,
+        "vkCreateShaderModule", module ? 0 : SHADPS4_LAB_STATUS_INTERNAL_ERROR, perm_idx,
+        diagnostic_frame_id, diagnostic_submission_id, 0, info.pgm_hash);
 
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     RegisterPipelineForensicsShader(module, final_spv, info, perm_idx);

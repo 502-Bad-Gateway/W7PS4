@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -31,6 +32,7 @@ namespace {
 
 using GraphicsLab::Diagnostics::DefaultFlightRecorderCapacity;
 using GraphicsLab::Diagnostics::FlightRecorder;
+using GraphicsLab::Diagnostics::FlightRecorderCrashInfo;
 using GraphicsLab::Diagnostics::MaximumFlightRecorderCapacity;
 using GraphicsLab::Diagnostics::MinimumFlightRecorderCapacity;
 
@@ -41,6 +43,7 @@ constexpr Shadps4LabStringViewV1 Text(const char (&value)[N]) noexcept {
 
 const Shadps4LabHostV1* active_host = nullptr;
 std::atomic<std::uint64_t> observed_events{};
+std::atomic<bool> crash_observed{};
 std::unique_ptr<FlightRecorder> recorder;
 std::filesystem::path raw_path;
 
@@ -283,6 +286,7 @@ Shadps4LabStatus Initialize(const Shadps4LabHostV1* host) noexcept {
     }
     active_host = host;
     observed_events.store(0, std::memory_order_relaxed);
+    crash_observed.store(false, std::memory_order_relaxed);
     recorder.reset();
     raw_path.clear();
 
@@ -335,9 +339,15 @@ void Shutdown() noexcept {
     if (recorder) {
         recorder->MarkCleanShutdown();
         try {
-            Log(SHADPS4_LAB_LOG_INFO,
-                "flight recorder closed cleanly after " + std::to_string(count) +
-                    " event(s): " + PathText(raw_path));
+            if (crash_observed.load(std::memory_order_relaxed)) {
+                Log(SHADPS4_LAB_LOG_WARNING,
+                    "flight recorder preserved a handled host crash after " +
+                        std::to_string(count) + " event(s): " + PathText(raw_path));
+            } else {
+                Log(SHADPS4_LAB_LOG_INFO,
+                    "flight recorder closed cleanly after " + std::to_string(count) +
+                        " event(s): " + PathText(raw_path));
+            }
         } catch (...) {
         }
         recorder->Close();
@@ -354,6 +364,24 @@ void Observe(const Shadps4LabEventV1* event) noexcept {
     observed_events.fetch_add(1, std::memory_order_relaxed);
     if (recorder) {
         recorder->Record(*event);
+        if (event->type == SHADPS4_LAB_EVENT_CRASH) {
+            FlightRecorderCrashInfo crash{};
+            crash.thread_id = event->thread_id;
+            crash.exception_code = static_cast<std::uint32_t>(event->result_code);
+            if (event->payload && event->payload_size >= sizeof(Shadps4LabCrashPayloadV1)) {
+                Shadps4LabCrashPayloadV1 payload{};
+                std::memcpy(&payload, event->payload, sizeof(payload));
+                if (payload.struct_size >= sizeof(payload)) {
+                    crash.exception_code = payload.exception_code;
+                    crash.access_type = payload.access_type;
+                    crash.instruction_address = payload.instruction_address;
+                    crash.fault_address = payload.fault_address;
+                    crash.module_base = payload.module_base;
+                }
+            }
+            crash_observed.store(true, std::memory_order_relaxed);
+            recorder->MarkCrashed(crash);
+        }
     }
 }
 
@@ -362,7 +390,7 @@ const Shadps4LabPluginV1 plugin = {
     SHADPS4_LAB_ABI_VERSION,
     SHADPS4_LAB_PLUGIN_KIND_TRACE_PROBE,
     0,
-    2,
+    3,
     0,
     SHADPS4_LAB_CAP_OBSERVE_EVENTS,
     Text("org.shadps4.graphics_lab.trace_probe"),

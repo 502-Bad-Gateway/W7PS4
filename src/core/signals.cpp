@@ -14,6 +14,7 @@
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/signals.h"
 #include "emulator.h"
+#include "graphics_lab/bridge.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -37,6 +38,36 @@ namespace Core {
 namespace {
 
 std::atomic_flag crash_dump_started = ATOMIC_FLAG_INIT;
+
+void NotifyGraphicsLabCrash(const EXCEPTION_POINTERS* exception) noexcept {
+    if (exception == nullptr || exception->ExceptionRecord == nullptr) {
+        return;
+    }
+    const auto* record = exception->ExceptionRecord;
+    const ULONG_PTR operation =
+        record->NumberParameters >= 1 ? record->ExceptionInformation[0] : ULONG_PTR(-1);
+    const auto access_type = operation == 0   ? SHADPS4_LAB_CRASH_ACCESS_READ
+                             : operation == 1 ? SHADPS4_LAB_CRASH_ACCESS_WRITE
+                             : operation == 8 ? SHADPS4_LAB_CRASH_ACCESS_EXECUTE
+                                              : SHADPS4_LAB_CRASH_ACCESS_UNKNOWN;
+    const std::uint64_t fault_address =
+        record->NumberParameters >= 2 ? record->ExceptionInformation[1] : 0;
+    const auto instruction_address =
+        reinterpret_cast<std::uint64_t>(record->ExceptionAddress);
+
+    HMODULE module{};
+    constexpr DWORD module_flags =
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    std::uint64_t module_base{};
+    if (record->ExceptionAddress != nullptr &&
+        GetModuleHandleExW(module_flags, reinterpret_cast<LPCWSTR>(record->ExceptionAddress),
+                           &module)) {
+        module_base = reinterpret_cast<std::uint64_t>(module);
+    }
+
+    GraphicsLab::Bridge::Instance().EmitCrash(record->ExceptionCode, access_type,
+                                               instruction_address, fault_address, module_base);
+}
 
 void LogWindows7ExceptionDetails(const EXCEPTION_POINTERS* exception) noexcept {
     if (exception == nullptr || exception->ExceptionRecord == nullptr) {
@@ -309,6 +340,7 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
     if (report_unhandled) { // Windows static guest red-zone protection
         LOG_CRITICAL(Debug, "Unhandled Exception code {:#x} at {}", code, address);
 #ifdef SHADPS4_WINDOWS_7_COMPAT
+        NotifyGraphicsLabCrash(pExp);
         LogWindows7ExceptionDetails(pExp);
         WriteWindows7MiniDump(pExp);
 #endif

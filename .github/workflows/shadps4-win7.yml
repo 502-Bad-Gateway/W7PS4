@@ -20,12 +20,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPERIMENT_ITERATION: "02"
-  EXPERIMENT_NAME: "flight-recorder"
+  EXPERIMENT_ITERATION: "03"
+  EXPERIMENT_NAME: "vulkan-breadcrumbs"
 
 jobs:
   build-win7-x64:
-    name: Build diagnostic flight recorder for Windows 7 x64
+    name: Build Vulkan crash breadcrumbs for Windows 7 x64
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -212,7 +212,7 @@ jobs:
           "%~dp0shadps4-win7-launcher.exe"
           '@ | Out-File -Encoding ascii (Join-Path $output 'run_diagnostic_disabled.bat')
           @'
-          Milestone C1 diagnostic flight-recorder controls
+          Milestone C2 Vulkan crash-breadcrumb controls
 
           run_diagnostic_disabled.bat: bridge discovers no modules and writes no Graphics Lab trace.
           run_diagnostic_loaded.bat: three shadow-copied modules initialize and the trace probe
@@ -230,8 +230,27 @@ jobs:
           flight-<pid>-<timestamp>.jsonl
           flight-<pid>-<timestamp>.done
 
-          The JSONL session line should report clean_shutdown=true after a normal exit. A forced
-          termination should still produce JSONL with clean_shutdown=false.
+          Normal-exit check:
+          The JSONL session line reports producer_state_name="clean_shutdown",
+          crashed=false, and clean_shutdown=true.
+
+          Sonic crash check:
+          The JSONL session line reports producer_state_name="crashed", crashed=true,
+          clean_shutdown=false, and a crash object containing exception_code_hex,
+          access_type, thread_id, instruction_address_hex, fault_address_hex, and
+          module_base_hex. Search backward from the crash event: the last step_begin or
+          driver_call_begin without a matching END identifies the interrupted Vulkan boundary.
+
+          Breadcrumbs cover shader translation/SPIR-V emission, vkCreateShaderModule,
+          vkCreateGraphicsPipelines, draw preparation, vkCmdBindPipeline, vkCmdDraw or
+          vkCmdDrawIndexed, render-pass and command-buffer recording, and vkQueueSubmit.
+          Draw and submit records include decoded payload objects in JSONL.
+
+          Pipeline-forensics reports that use the SafeGPU flat-fragment override should name a
+          generated_safe_gpu_flat_fragment_spv_*.spv module instead of <not-captured>.
+
+          Disabled-path check:
+          The disabled run writes no flight-*.glfr, flight-*.jsonl, or flight-*.done file.
           '@ | Out-File -Encoding utf8 (Join-Path $output 'DIAGNOSTIC-TEST.txt')
 
           $manifest = Get-Content 'ci/build11-materialized.json' -Raw | ConvertFrom-Json
@@ -249,7 +268,8 @@ jobs:
           Build 11 transform parent: $($manifest.build11_transform_parent)
           Materialized source diff: $($manifest.source_diff_git_blob)
           Runtime plugin integration: discovery, shadow copy, ABI validation and event observation
-          Diagnostic recorder: file-backed shared-memory ring with out-of-process JSONL collector
+          Diagnostic recorder: truthful crash state and ordered Vulkan BEGIN/END breadcrumbs
+          Generated shader mapping: SafeGPU flat-fragment SPIR-V is captured
           Runtime policy dispatch: disabled
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 

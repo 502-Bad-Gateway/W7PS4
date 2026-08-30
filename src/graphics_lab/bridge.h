@@ -22,7 +22,12 @@ public:
     void EmitEvent(Shadps4LabEventType type, Shadps4LabStage stage, std::string_view name,
                    std::int32_t result_code = 0, std::uint64_t object_id = 0,
                    std::uint64_t frame_id = 0, std::uint64_t submission_id = 0,
-                   std::uint64_t pipeline_hash = 0, std::uint64_t shader_hash = 0) noexcept;
+                   std::uint64_t pipeline_hash = 0, std::uint64_t shader_hash = 0,
+                   const void* payload = nullptr, std::uint32_t payload_size = 0) noexcept;
+
+    void EmitCrash(std::uint32_t exception_code, Shadps4LabCrashAccessType access_type,
+                   std::uint64_t instruction_address, std::uint64_t fault_address,
+                   std::uint64_t module_base) noexcept;
 
     [[nodiscard]] std::size_t LoadedPluginCount() const noexcept;
     [[nodiscard]] std::uint64_t LastEventSequence() const noexcept;

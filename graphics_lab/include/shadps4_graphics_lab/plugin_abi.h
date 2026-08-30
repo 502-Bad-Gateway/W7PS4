@@ -166,7 +166,49 @@ enum {
     SHADPS4_LAB_EVENT_OBJECT_LIFETIME = 5,
     SHADPS4_LAB_EVENT_SUBMISSION = 6,
     SHADPS4_LAB_EVENT_DIAGNOSTIC = 7,
+    SHADPS4_LAB_EVENT_STEP_BEGIN = 8,
+    SHADPS4_LAB_EVENT_STEP_END = 9,
+    SHADPS4_LAB_EVENT_CRASH = 10,
 };
+
+typedef uint32_t Shadps4LabCrashAccessType;
+enum {
+    SHADPS4_LAB_CRASH_ACCESS_UNKNOWN = 0,
+    SHADPS4_LAB_CRASH_ACCESS_READ = 1,
+    SHADPS4_LAB_CRASH_ACCESS_WRITE = 2,
+    SHADPS4_LAB_CRASH_ACCESS_EXECUTE = 3,
+};
+
+typedef struct Shadps4LabCrashPayloadV1 {
+    uint32_t struct_size;
+    uint32_t exception_code;
+    Shadps4LabCrashAccessType access_type;
+    uint32_t reserved;
+    uint64_t instruction_address;
+    uint64_t fault_address;
+    uint64_t module_base;
+} Shadps4LabCrashPayloadV1;
+
+typedef struct Shadps4LabDrawPayloadV1 {
+    uint32_t struct_size;
+    uint32_t indexed;
+    uint32_t vertex_or_index_count;
+    uint32_t instance_count;
+    int32_t vertex_offset;
+    uint32_t first_vertex_or_index;
+    uint32_t first_instance;
+    uint32_t index_buffer_offset;
+} Shadps4LabDrawPayloadV1;
+
+typedef struct Shadps4LabQueueSubmitPayloadV1 {
+    uint32_t struct_size;
+    uint32_t wait_semaphore_count;
+    uint32_t signal_semaphore_count;
+    uint32_t command_buffer_count;
+    uint64_t signal_value;
+    uint64_t command_buffer_id;
+    uint64_t fence_id;
+} Shadps4LabQueueSubmitPayloadV1;
 
 typedef struct Shadps4LabEventV1 {
     uint32_t struct_size;

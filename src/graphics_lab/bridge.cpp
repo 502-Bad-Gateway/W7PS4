@@ -84,7 +84,7 @@ bool Bridge::Initialize(const std::filesystem::path& executable_path) noexcept {
     options.loading_enabled = !IsDisabledByEnvironment();
 
     LOG_INFO(Config,
-             "[GraphicsLab] diagnostic flight-recorder milestone; rendering policy dispatch "
+             "[GraphicsLab] Vulkan crash-breadcrumb milestone; rendering policy dispatch "
              "disabled");
     const bool success = host.Initialize(options);
     initialized = true;
@@ -113,7 +113,8 @@ void Bridge::EmitEvent(const Shadps4LabEventType type, const Shadps4LabStage sta
                        const std::string_view name, const std::int32_t result_code,
                        const std::uint64_t object_id, const std::uint64_t frame_id,
                        const std::uint64_t submission_id, const std::uint64_t pipeline_hash,
-                       const std::uint64_t shader_hash) noexcept {
+                       const std::uint64_t shader_hash, const void* payload,
+                       const std::uint32_t payload_size) noexcept {
     if (!initialized) {
         return;
     }
@@ -128,7 +129,28 @@ void Bridge::EmitEvent(const Shadps4LabEventType type, const Shadps4LabStage sta
     event.pipeline_hash = pipeline_hash;
     event.shader_hash = shader_hash;
     event.name = {name.data(), static_cast<std::uint32_t>(name.size())};
+    event.payload = payload;
+    event.payload_size = payload_size;
     host.PublishEvent(event);
+}
+
+void Bridge::EmitCrash(const std::uint32_t exception_code,
+                       const Shadps4LabCrashAccessType access_type,
+                       const std::uint64_t instruction_address,
+                       const std::uint64_t fault_address,
+                       const std::uint64_t module_base) noexcept {
+    const Shadps4LabCrashPayloadV1 payload{
+        .struct_size = sizeof(Shadps4LabCrashPayloadV1),
+        .exception_code = exception_code,
+        .access_type = access_type,
+        .reserved = 0,
+        .instruction_address = instruction_address,
+        .fault_address = fault_address,
+        .module_base = module_base,
+    };
+    EmitEvent(SHADPS4_LAB_EVENT_CRASH, SHADPS4_LAB_STAGE_UNKNOWN,
+              "process.unhandled_exception", static_cast<std::int32_t>(exception_code), 0, 0, 0,
+              0, 0, &payload, sizeof(payload));
 }
 
 std::size_t Bridge::LoadedPluginCount() const noexcept {

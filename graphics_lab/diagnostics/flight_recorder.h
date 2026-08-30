@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "flight_recorder_format.h"
 #include "shadps4_graphics_lab/plugin_abi.h"
 
 namespace GraphicsLab::Diagnostics {
@@ -26,6 +27,7 @@ public:
               std::uint64_t producer_pid, std::uint64_t created_unix_ns,
               std::string* error) noexcept;
     void Record(const Shadps4LabEventV1& event) noexcept;
+    void MarkCrashed(const FlightRecorderCrashInfo& crash) noexcept;
     void MarkCleanShutdown() noexcept;
     void Close() noexcept;
 

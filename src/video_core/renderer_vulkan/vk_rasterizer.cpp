@@ -6,6 +6,7 @@
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
+#include "graphics_lab/bridge.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -25,6 +26,25 @@
 #endif
 
 namespace Vulkan {
+
+namespace {
+
+std::uint64_t CommandBufferId(const vk::CommandBuffer command_buffer) noexcept {
+    return static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(static_cast<VkCommandBuffer>(command_buffer)));
+}
+
+void EmitBreadcrumb(const Shadps4LabEventType type, const Shadps4LabStage stage,
+                    const std::string_view name, const std::int32_t result_code,
+                    const std::uint64_t object_id, const std::uint64_t frame_id,
+                    const std::uint64_t submission_id, const std::uint64_t pipeline_hash,
+                    const void* payload = nullptr, const std::uint32_t payload_size = 0) noexcept {
+    GraphicsLab::Bridge::Instance().EmitEvent(type, stage, name, result_code, object_id, frame_id,
+                                               submission_id, pipeline_hash, 0, payload,
+                                               payload_size);
+}
+
+} // namespace
 
 static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
     // TODO(roamic): Add support for multiple viewports and geometry shaders when ViewportIndex
@@ -365,29 +385,116 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         }
     }
 
+    const u64 diagnostic_pipeline_hash =
+        std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey());
+    const u64 diagnostic_frame_id = DebugState.GetFrameNum();
+    const u64 diagnostic_submission_id = scheduler.CurrentTick();
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.record", 0, 0, diagnostic_frame_id, diagnostic_submission_id,
+                   diagnostic_pipeline_hash);
+
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.prepare_render_state", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     PrepareRenderState(pipeline);
-    if (!BindResources(pipeline)) {
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.prepare_render_state", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
+
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_DESCRIPTOR,
+                   "draw.bind_resources", 0, 0, diagnostic_frame_id, diagnostic_submission_id,
+                   diagnostic_pipeline_hash);
+    const bool resources_bound = BindResources(pipeline);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_DESCRIPTOR,
+                   "draw.bind_resources", resources_bound ? 0 : 1, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
+    if (!resources_bound) {
+        EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                       "draw.record", 1, 0, diagnostic_frame_id, diagnostic_submission_id,
+                       diagnostic_pipeline_hash);
         return;
     }
-    const auto state = BeginRendering(pipeline);
 
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_RESOURCE,
+                   "draw.build_render_state", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
+    const auto state = BeginRendering(pipeline);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_RESOURCE,
+                   "draw.build_render_state", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
+
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_RESOURCE,
+                   "draw.bind_vertex_buffers", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     buffer_cache.BindVertexBuffers(*pipeline, buffer_barriers);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_RESOURCE,
+                   "draw.bind_vertex_buffers", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     if (is_indexed) {
+        EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_RESOURCE,
+                       "draw.bind_index_buffer", 0, 0, diagnostic_frame_id,
+                       diagnostic_submission_id, diagnostic_pipeline_hash);
         buffer_cache.BindIndexBuffer(index_offset, buffer_barriers);
+        EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_RESOURCE,
+                       "draw.bind_index_buffer", 0, 0, diagnostic_frame_id,
+                       diagnostic_submission_id, diagnostic_pipeline_hash);
     }
 
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_DESCRIPTOR,
+                   "draw.pipeline_bind_resources", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_DESCRIPTOR,
+                   "draw.pipeline_bind_resources", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
+
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.update_dynamic_state", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     UpdateDynamicState(pipeline, is_indexed);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.update_dynamic_state", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
+
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.begin_rendering", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     scheduler.BeginRendering(state);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.begin_rendering", 0, 0, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
 
     const auto& vs_info = pipeline->GetStage(Shader::LogicalStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
     const auto [vertex_offset, instance_offset] = GetDrawOffsets(regs, vs_info, fetch_shader);
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    const u64 command_buffer_id = CommandBufferId(cmdbuf);
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                   SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdBindPipeline", 0,
+                   command_buffer_id, diagnostic_frame_id, diagnostic_submission_id,
+                   diagnostic_pipeline_hash);
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "vkCmdBindPipeline", 0, command_buffer_id, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
     PersistLastSubmittedGraphicsPipeline(pipeline, "direct", is_indexed);
 
+    const Shadps4LabDrawPayloadV1 draw_payload{
+        .struct_size = sizeof(Shadps4LabDrawPayloadV1),
+        .indexed = is_indexed ? 1u : 0u,
+        .vertex_or_index_count = regs.num_indices,
+        .instance_count = regs.num_instances.NumInstances(),
+        .vertex_offset = is_indexed ? static_cast<std::int32_t>(vertex_offset) : 0,
+        .first_vertex_or_index = is_indexed ? 0u : static_cast<std::uint32_t>(vertex_offset),
+        .first_instance = instance_offset,
+        .index_buffer_offset = index_offset,
+    };
+    const std::string_view draw_call_name = is_indexed ? "vkCmdDrawIndexed" : "vkCmdDraw";
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                   SHADPS4_LAB_STAGE_COMMAND_RECORDING, draw_call_name, 0, command_buffer_id,
+                   diagnostic_frame_id, diagnostic_submission_id, diagnostic_pipeline_hash,
+                   &draw_payload, sizeof(draw_payload));
     if (is_indexed) {
         cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
                            s32(vertex_offset), instance_offset);
@@ -395,9 +502,16 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         cmdbuf.draw(regs.num_indices, regs.num_instances.NumInstances(), vertex_offset,
                     instance_offset);
     }
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                   SHADPS4_LAB_STAGE_COMMAND_RECORDING, draw_call_name, 0, command_buffer_id,
+                   diagnostic_frame_id, diagnostic_submission_id, diagnostic_pipeline_hash,
+                   &draw_payload, sizeof(draw_payload));
     DebugState.IncDrawCall();
 
     ResetBindings();
+    EmitBreadcrumb(SHADPS4_LAB_EVENT_STEP_END, SHADPS4_LAB_STAGE_COMMAND_RECORDING,
+                   "draw.record", 0, command_buffer_id, diagnostic_frame_id,
+                   diagnostic_submission_id, diagnostic_pipeline_hash);
 }
 
 void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 stride,

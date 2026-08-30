@@ -7,11 +7,18 @@ This directory is the isolated, standalone foundation for three runtime modules:
 - `shadps4_trace_probe`: structured diagnostic-event observer;
 - `shadps4_trace_collector`: out-of-process crash-safe collector and JSONL decoder.
 
-The current milestone adds an observational host event bus and a file-backed shared-memory flight
-recorder. The trace probe receives lifecycle, configuration and initial Vulkan driver-boundary
-events. Every event receives one host-assigned monotonic sequence and is copied into a fixed-size
-record before the callback returns. The collector produces JSONL after a clean exit or detects the
-producer process ending after a crash/forced termination. It does **not** call rendering-policy
+The current milestone extends the observational event bus and file-backed shared-memory flight
+recorder with Vulkan crash breadcrumbs. The trace probe records BEGIN/END pairs for shader
+translation, SPIR-V emission, shader and graphics-pipeline creation, draw preparation and command
+recording, render-pass setup, command-buffer completion, and queue submission. Events carry the
+available frame, submission, pipeline, command-buffer, and driver-object identities. An unhandled
+Windows exception is stored as a durable `crashed` producer state with its exception code, access
+type, thread, instruction address, fault address, and containing module base. Normal teardown can
+no longer relabel that session as clean.
+
+The collector produces JSONL after a clean exit or detects the producer process ending after a
+crash/forced termination. The SafeGPU-generated flat-fragment module is now included in pipeline
+forensics instead of appearing as `<not-captured>`. The milestone does **not** call rendering-policy
 callbacks, alter Vulkan behavior, or replace the tested Build 11 SafeGPU implementation.
 
 The raw `.glfr`, decoded `.jsonl`, and `.done` summary files are written below
@@ -53,4 +60,5 @@ The exact CI-time Build 09-r2, Build 10 and Build 11 transformations are materia
 source and identified by `ci/build11-materialized.json`. The discovery-only loaded/disabled control
 was physically validated on the target Windows 7 machine. This diagnostic milestone must keep that
 rendering behavior unchanged while the loaded path produces ordered `.glfr`, `.jsonl`, and `.done`
-outputs and the disabled path produces no Graphics Lab trace.
+outputs, crash sessions remain labeled `crashed`, and the disabled path produces no Graphics Lab
+trace.

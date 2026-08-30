@@ -1,14 +1,43 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdint>
+#include <string_view>
+#include <type_traits>
+
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/thread.h"
+#include "core/debug_state.h"
+#include "graphics_lab/bridge.h"
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
+
+namespace {
+
+template <typename Handle>
+std::uint64_t NativeHandleId(const Handle handle) noexcept {
+    if constexpr (std::is_pointer_v<Handle>) {
+        return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(handle));
+    } else {
+        return static_cast<std::uint64_t>(handle);
+    }
+}
+
+void EmitSchedulerBreadcrumb(const Shadps4LabEventType type, const Shadps4LabStage stage,
+                             const std::string_view name, const std::int32_t result_code,
+                             const std::uint64_t object_id, const std::uint64_t submission_id,
+                             const void* payload = nullptr,
+                             const std::uint32_t payload_size = 0) noexcept {
+    GraphicsLab::Bridge::Instance().EmitEvent(type, stage, name, result_code, object_id,
+                                               DebugState.GetFrameNum(), submission_id, 0, 0,
+                                               payload, payload_size);
+}
+
+} // namespace
 
 std::mutex Scheduler::submit_mutex;
 
@@ -40,6 +69,9 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     EndRendering();
     is_rendering = true;
     render_state = new_state;
+    const u64 diagnostic_submission_id = CurrentTick();
+    const u64 command_buffer_id =
+        NativeHandleId(static_cast<VkCommandBuffer>(current_cmdbuf));
 
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     boost::container::static_vector<vk::ImageView, 9> attachment_views;
@@ -61,8 +93,15 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         .height = render_state.height,
         .layers = render_state.num_layers,
     };
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCreateFramebuffer", 0,
+                            command_buffer_id, diagnostic_submission_id);
     auto [framebuffer_result, framebuffer] =
         instance.GetDevice().createFramebuffer(framebuffer_info);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCreateFramebuffer",
+                            static_cast<std::int32_t>(framebuffer_result), command_buffer_id,
+                            diagnostic_submission_id);
     ASSERT_MSG(framebuffer_result == vk::Result::eSuccess,
                "Failed to create concrete legacy framebuffer: {}",
                vk::to_string(framebuffer_result));
@@ -80,7 +119,13 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     const vk::SubpassBeginInfo subpass_begin_info{
         .contents = vk::SubpassContents::eInline,
     };
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdBeginRenderPass2", 0,
+                            command_buffer_id, diagnostic_submission_id);
     current_cmdbuf.beginRenderPass2(begin_info, subpass_begin_info);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdBeginRenderPass2", 0,
+                            command_buffer_id, diagnostic_submission_id);
 
     boost::container::static_vector<vk::ClearAttachment, 9> clear_attachments;
     for (u32 index = 0; index < render_state.num_color_attachments; ++index) {
@@ -113,7 +158,13 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
             .baseArrayLayer = 0,
             .layerCount = render_state.num_layers,
         };
+        EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                                SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdClearAttachments", 0,
+                                command_buffer_id, diagnostic_submission_id);
         current_cmdbuf.clearAttachments(clear_attachments, clear_rect);
+        EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                                SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdClearAttachments", 0,
+                                command_buffer_id, diagnostic_submission_id);
     }
 #else
     std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
@@ -160,7 +211,13 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         .pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr,
     };
 
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdBeginRendering", 0,
+                            command_buffer_id, diagnostic_submission_id);
     current_cmdbuf.beginRendering(rendering_info);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdBeginRendering", 0,
+                            command_buffer_id, diagnostic_submission_id);
 #endif
 }
 
@@ -171,13 +228,31 @@ void Scheduler::EndRendering() {
     is_rendering = false;
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     const vk::SubpassEndInfo subpass_end_info{};
+    const u64 diagnostic_submission_id = CurrentTick();
+    const u64 command_buffer_id =
+        NativeHandleId(static_cast<VkCommandBuffer>(current_cmdbuf));
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdEndRenderPass2", 0,
+                            command_buffer_id, diagnostic_submission_id);
     current_cmdbuf.endRenderPass2(subpass_end_info);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdEndRenderPass2", 0,
+                            command_buffer_id, diagnostic_submission_id);
     const vk::Framebuffer framebuffer = legacy_framebuffer;
     legacy_framebuffer = nullptr;
     const vk::Device device = instance.GetDevice();
     DeferOperation([device, framebuffer] { device.destroyFramebuffer(framebuffer); });
 #else
+    const u64 diagnostic_submission_id = CurrentTick();
+    const u64 command_buffer_id =
+        NativeHandleId(static_cast<VkCommandBuffer>(current_cmdbuf));
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdEndRendering", 0,
+                            command_buffer_id, diagnostic_submission_id);
     current_cmdbuf.endRendering();
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkCmdEndRendering", 0,
+                            command_buffer_id, diagnostic_submission_id);
 #endif
 }
 
@@ -223,7 +298,18 @@ void Scheduler::AllocateWorkerCommandBuffers() {
     };
 
     current_cmdbuf = command_pool.Commit();
-    Check(current_cmdbuf.begin(begin_info));
+    const u64 command_buffer_id =
+        NativeHandleId(static_cast<VkCommandBuffer>(current_cmdbuf));
+    const u64 diagnostic_submission_id = CurrentTick();
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkBeginCommandBuffer", 0,
+                            command_buffer_id, diagnostic_submission_id);
+    const auto begin_result = current_cmdbuf.begin(begin_info);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkBeginCommandBuffer",
+                            static_cast<std::int32_t>(begin_result), command_buffer_id,
+                            diagnostic_submission_id);
+    Check(begin_result);
 
     // Invalidate dynamic state so it gets applied to the new command buffer.
     dynamic_state.Invalidate();
@@ -241,6 +327,8 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 void Scheduler::SubmitExecution(SubmitInfo& info) {
     std::scoped_lock lk{submit_mutex};
     const u64 signal_value = master_semaphore.NextTick();
+    const u64 command_buffer_id =
+        NativeHandleId(static_cast<VkCommandBuffer>(current_cmdbuf));
 
 #if TRACY_GPU_ENABLED
     auto* profiler_ctx = instance.GetProfilerContext();
@@ -251,7 +339,15 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 #endif
 
     EndRendering();
-    Check(current_cmdbuf.end());
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkEndCommandBuffer", 0,
+                            command_buffer_id, signal_value);
+    const auto end_result = current_cmdbuf.end();
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_COMMAND_RECORDING, "vkEndCommandBuffer",
+                            static_cast<std::int32_t>(end_result), command_buffer_id,
+                            signal_value);
+    Check(end_result);
 
     const vk::Semaphore timeline = master_semaphore.Handle();
     info.AddSignal(timeline, signal_value);
@@ -279,15 +375,58 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         .pSignalSemaphores = info.signal_semas.data(),
     };
 
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION, "imgui.texture_submit", 0,
+                            command_buffer_id, signal_value);
     ImGui::Core::TextureManager::Submit();
-    auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_STEP_END,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION, "imgui.texture_submit", 0,
+                            command_buffer_id, signal_value);
+
+    const auto graphics_queue = instance.GetGraphicsQueue();
+    const u64 queue_id = NativeHandleId(static_cast<VkQueue>(graphics_queue));
+    const u64 fence_id = NativeHandleId(static_cast<VkFence>(info.fence));
+    const Shadps4LabQueueSubmitPayloadV1 submit_payload{
+        .struct_size = sizeof(Shadps4LabQueueSubmitPayloadV1),
+        .wait_semaphore_count = info.num_wait_semas,
+        .signal_semaphore_count = info.num_signal_semas,
+        .command_buffer_count = 1,
+        .signal_value = signal_value,
+        .command_buffer_id = command_buffer_id,
+        .fence_id = fence_id,
+    };
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_BEGIN,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION, "vkQueueSubmit", 0, queue_id,
+                            signal_value, &submit_payload, sizeof(submit_payload));
+    auto submit_result = graphics_queue.submit(submit_info, info.fence);
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_DRIVER_CALL_END,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION, "vkQueueSubmit",
+                            static_cast<std::int32_t>(submit_result), queue_id, signal_value,
+                            &submit_payload, sizeof(submit_payload));
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
 
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_SUBMISSION,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION, "queue.submitted",
+                            static_cast<std::int32_t>(submit_result), queue_id, signal_value,
+                            &submit_payload, sizeof(submit_payload));
+
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION,
+                            "queue.refresh_timeline", 0, queue_id, signal_value);
     master_semaphore.Refresh();
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_STEP_END,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION,
+                            "queue.refresh_timeline", 0, queue_id, signal_value);
     AllocateWorkerCommandBuffers();
 
     // Apply pending operations
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_STEP_BEGIN,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION,
+                            "queue.pop_pending_operations", 0, queue_id, signal_value);
     PopPendingOperations();
+    EmitSchedulerBreadcrumb(SHADPS4_LAB_EVENT_STEP_END,
+                            SHADPS4_LAB_STAGE_QUEUE_SUBMISSION,
+                            "queue.pop_pending_operations", 0, queue_id, signal_value);
 }
 
 void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
