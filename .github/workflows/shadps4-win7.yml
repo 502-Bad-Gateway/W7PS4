@@ -19,12 +19,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  EXPERIMENT_ITERATION: "00"
-  EXPERIMENT_NAME: "build11-materialized"
+  EXPERIMENT_ITERATION: "01"
+  EXPERIMENT_NAME: "bridge-loader"
 
 jobs:
   build-win7-x64:
-    name: Build materialized Build 11 for Windows 7 x64
+    name: Build discovery-only bridge for Windows 7 x64
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -89,6 +89,24 @@ jobs:
         uses: egor-tensin/vs-shell@v2
         with:
           arch: x64
+
+      - name: Configure Graphics Lab modules and host tests
+        shell: pwsh
+        run: |
+          cmake -S graphics_lab -B build/graphics-lab -G Ninja `
+            -DCMAKE_C_COMPILER=clang-cl `
+            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSHADPS4_LAB_BUILD_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics Lab configure failed.' }
+
+      - name: Build and validate Graphics Lab modules
+        shell: pwsh
+        run: |
+          cmake --build build/graphics-lab --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics Lab build failed.' }
+          ctest --test-dir build/graphics-lab --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Graphics Lab host/ABI validation failed.' }
 
       - name: Prepare launcher dependency
         shell: pwsh
@@ -161,6 +179,50 @@ jobs:
             (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
           Copy-Item 'ci/build11-materialized.json' $output
 
+          $labRoot = Join-Path $output 'graphics_lab'
+          $pluginDirectory = Join-Path $labRoot 'plugins'
+          $toolDirectory = Join-Path $labRoot 'tools'
+          New-Item -ItemType Directory -Force -Path $pluginDirectory | Out-Null
+          New-Item -ItemType Directory -Force -Path $toolDirectory | Out-Null
+          foreach ($name in @(
+            'shadps4_safe_gpu.dll',
+            'shadps4_vulkan_lab.dll',
+            'shadps4_trace_probe.dll'
+          )) {
+            $file = Join-Path $env:GITHUB_WORKSPACE "build/graphics-lab/$name"
+            if (!(Test-Path $file)) { throw "Required Graphics Lab module missing: $name" }
+            Copy-Item $file $pluginDirectory
+          }
+          Copy-Item 'build/graphics-lab/shadps4_trace_collector.exe' $labRoot
+          Copy-Item 'build/graphics-lab/shadps4_lab_host_smoke.exe' $toolDirectory
+          Copy-Item 'graphics_lab/profiles' (Join-Path $labRoot 'profiles') -Recurse
+          Get-ChildItem 'build/graphics-lab' -File -Filter '*.pdb' |
+            Copy-Item -Destination $toolDirectory
+
+          @'
+          @echo off
+          set "SHADPS4_GRAPHICS_LAB_DISABLE="
+          "%~dp0shadps4-win7-launcher.exe"
+          '@ | Out-File -Encoding ascii (Join-Path $output 'run_bridge_loaded.bat')
+          @'
+          @echo off
+          set "SHADPS4_GRAPHICS_LAB_DISABLE=1"
+          "%~dp0shadps4-win7-launcher.exe"
+          '@ | Out-File -Encoding ascii (Join-Path $output 'run_bridge_disabled.bat')
+          @'
+          Milestone B control paths
+
+          run_bridge_disabled.bat: bridge discovers no modules by explicit host control.
+          run_bridge_loaded.bat: three shadow-copied modules initialize, but no policy or event
+          callback is connected to rendering in this milestone.
+
+          Expected loaded-path log:
+          [GraphicsLab] initialized with 3 plugin(s)
+
+          Expected disabled-path log:
+          [GraphicsLab] initialized with 0 plugin(s)
+          '@ | Out-File -Encoding utf8 (Join-Path $output 'BRIDGE-TEST.txt')
+
           $manifest = Get-Content 'ci/build11-materialized.json' -Raw | ConvertFrom-Json
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
@@ -175,7 +237,8 @@ jobs:
           Historical source head: $($manifest.historical_source_head)
           Build 11 transform parent: $($manifest.build11_transform_parent)
           Materialized source diff: $($manifest.source_diff_git_blob)
-          Runtime plugin integration: not active
+          Runtime plugin integration: discovery, shadow copy, ABI validation and lifecycle only
+          Runtime policy dispatch: disabled
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload shadPS4 artifact
